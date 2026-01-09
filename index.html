@@ -1,0 +1,1347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trajectory Code Viewer</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+
+        .upload-section {
+            padding: 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .file-input-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .file-input-group {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .file-input-label {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #667eea;
+            color: white;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 500;
+            transition: background 0.3s;
+        }
+
+        .file-input-label:hover {
+            background: #5568d3;
+        }
+
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .file-name {
+            color: #495057;
+            font-size: 0.95em;
+            margin-top: 10px;
+        }
+
+        .main-content {
+            display: flex;
+            min-height: 600px;
+        }
+
+        .sidebar {
+            width: 300px;
+            background: #f8f9fa;
+            border-right: 1px solid #e9ecef;
+            overflow-y: auto;
+            max-height: calc(100vh - 250px);
+        }
+
+        .content-area {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+            max-height: calc(100vh - 250px);
+        }
+
+        .submission-list {
+            list-style: none;
+        }
+
+        .submission-item {
+            padding: 15px 20px;
+            border-bottom: 1px solid #e9ecef;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .submission-item:hover {
+            background: #e9ecef;
+        }
+
+        .submission-item.active {
+            background: #667eea;
+            color: white;
+        }
+
+        .submission-header {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .submission-score {
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
+        .submission-item.active .submission-score {
+            opacity: 0.9;
+        }
+
+        .stats-bar {
+            padding: 15px 20px;
+            background: white;
+            border-bottom: 2px solid #667eea;
+            font-weight: 600;
+            color: #495057;
+        }
+
+        .view-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-size: 1em;
+            color: #6c757d;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            transition: color 0.2s;
+        }
+
+        .tab:hover {
+            color: #667eea;
+        }
+
+        .tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+            font-weight: 600;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .code-viewer {
+            background: #282c34;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        .code-header {
+            background: #21252b;
+            padding: 10px 15px;
+            color: #abb2bf;
+            font-size: 0.9em;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .code-body {
+            padding: 0;
+            overflow-x: auto;
+        }
+
+        pre {
+            margin: 0;
+            color: #abb2bf;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.9em;
+            line-height: 1.5;
+        }
+
+        pre[class*="language-"] {
+            margin: 0;
+            padding: 20px;
+        }
+
+        code {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        }
+
+        /* Line numbers styling */
+        .line-numbers .line-numbers-rows {
+            border-right: 1px solid #3e4451;
+            background: #21252b;
+        }
+
+        .line-numbers-rows > span:before {
+            color: #5c6370;
+        }
+
+        .conversation-viewer {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+        }
+
+        .conv-entry {
+            margin-bottom: 25px;
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            border-left: 4px solid #667eea;
+        }
+
+        .conv-entry.user {
+            border-left-color: #7b1fa2;
+        }
+
+        .conv-entry.output {
+            border-left-color: #17a2b8;
+        }
+        
+        .conv-entry.observation {
+            border-left-color: #17a2b8; /* Keep for backwards compatibility */
+        }
+
+        .conv-entry.action {
+            border-left-color: #28a745;
+        }
+
+        .conv-entry.assistant {
+            border-left-color: #667eea;
+        }
+
+        .conv-label {
+            font-weight: 600;
+            font-size: 0.85em;
+            text-transform: uppercase;
+            color: #6c757d;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .conv-label:hover {
+            color: #495057;
+        }
+
+        .conv-toggle {
+            font-size: 0.9em;
+            color: #6c757d;
+            transition: transform 0.2s;
+        }
+
+        .conv-entry.collapsed .conv-toggle {
+            transform: rotate(-90deg);
+        }
+
+        .conv-content {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.9em;
+            line-height: 1.6;
+            transition: max-height 0.3s ease, opacity 0.3s ease;
+            overflow: hidden;
+        }
+
+        .conv-entry.collapsed .conv-content {
+            max-height: 0 !important;
+            opacity: 0;
+            margin: 0;
+            padding: 0;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #6c757d;
+        }
+
+        .error {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            color: #856404;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+
+        .empty-state h3 {
+            margin-bottom: 10px;
+            color: #495057;
+        }
+
+        .score-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 600;
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .score-badge.best {
+            background: #fff3e0;
+            color: #e65100;
+        }
+
+        .metadata {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 0.9em;
+        }
+
+        .metadata-item {
+            margin-bottom: 8px;
+        }
+
+        .metadata-label {
+            font-weight: 600;
+            color: #495057;
+            display: inline-block;
+            width: 150px;
+        }
+
+        .summary-section {
+            background: #f0f7ff;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .summary-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .summary-title {
+            font-weight: 600;
+            color: #495057;
+        }
+
+        .generate-summary-btn {
+            padding: 6px 12px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: background 0.3s;
+        }
+
+        .generate-summary-btn:hover {
+            background: #5568d3;
+        }
+
+        .generate-summary-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .summary-content {
+            color: #212529;
+            line-height: 1.6;
+        }
+
+        .summary-loading {
+            color: #6c757d;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Trajectory Code Viewer</h1>
+            <p>View code submissions and conversations from trajectory files</p>
+        </div>
+
+        <div class="upload-section">
+            <div class="file-input-wrapper">
+                <label for="traj-input" class="file-input-label">
+                    📁 Choose .traj File
+                </label>
+                <input type="file" id="traj-input" accept=".traj" />
+                <div class="file-name" id="file-names"></div>
+            </div>
+        </div>
+
+        <div id="main-content" class="main-content" style="display: none;">
+            <div class="sidebar">
+                <div class="stats-bar" id="stats-bar">
+                    <div>Submissions: <span id="total-submissions">0</span></div>
+                </div>
+                <ul class="submission-list" id="submission-list"></ul>
+            </div>
+
+            <div class="content-area">
+                <div id="empty-state" class="empty-state">
+                    <h3>Select a submission to view</h3>
+                    <p>Choose a submission from the sidebar to see the code and conversation</p>
+                </div>
+
+                <div id="content-view" style="display: none;">
+                    <div class="view-tabs">
+                        <button class="tab active" data-tab="code">Code</button>
+                        <button class="tab" data-tab="conversation">Conversation</button>
+                        <button class="tab" data-tab="metadata">Metadata</button>
+                    </div>
+
+                    <div class="tab-content active" id="tab-code">
+                        <div class="summary-section" id="summary-section" style="display: none;">
+                            <div class="summary-header">
+                                <div class="summary-title">📝 Approach Summary</div>
+                                <button class="generate-summary-btn" id="generate-summary-btn">Generate Summary</button>
+                            </div>
+                            <div class="summary-content" id="summary-content">Click "Generate Summary" to get an LLM-generated summary of this attempt's approach.</div>
+                        </div>
+                        <div class="code-viewer">
+                            <div class="code-header">
+                                <span id="code-filename">Code File</span>
+                                <span class="score-badge" id="code-score-badge">Score: -</span>
+                            </div>
+                            <div class="code-body">
+                                <pre class="line-numbers"><code id="code-content" class="language-python">Loading...</code></pre>
+                            </div>
+                            <div id="no-code-message" style="display: none; padding: 40px; text-align: center; color: #6c757d;">
+                                <p>This section contains data preprocessing and exploration steps only.</p>
+                                <p>No code was generated yet.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="tab-content" id="tab-conversation">
+                        <div class="conversation-viewer" id="conversation-content">
+                            Loading conversation...
+                        </div>
+                    </div>
+
+                    <div class="tab-content" id="tab-metadata">
+                        <div class="metadata" id="metadata-content">
+                            Loading metadata...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let trajectoryData = null;
+        let submissions = [];
+        let currentSubmissionIndex = -1;
+
+        const trajInput = document.getElementById('traj-input');
+        const fileNames = document.getElementById('file-names');
+        const mainContent = document.getElementById('main-content');
+        const submissionList = document.getElementById('submission-list');
+        const statsBar = document.getElementById('stats-bar');
+        const totalSubmissions = document.getElementById('total-submissions');
+        const emptyState = document.getElementById('empty-state');
+        const contentView = document.getElementById('content-view');
+
+        trajInput.addEventListener('change', handleTrajFile);
+
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const targetTab = tab.dataset.tab;
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById(`tab-${targetTab}`).classList.add('active');
+            });
+        });
+
+        function handleTrajFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            updateFileNames();
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    trajectoryData = JSON.parse(e.target.result);
+                    processTrajectory();
+                } catch (error) {
+                    alert(`Error parsing trajectory file: ${error.message}`);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function updateFileNames() {
+            const trajFile = trajInput.files[0]?.name || '';
+            if (trajFile) {
+                fileNames.textContent = `Selected: ${trajFile}`;
+            }
+        }
+
+        function processTrajectory() {
+            if (!trajectoryData || !trajectoryData.trajectory) {
+                alert('Invalid trajectory file');
+                return;
+            }
+
+            submissions = extractSubmissions(trajectoryData);
+            displaySubmissions();
+            mainContent.style.display = 'flex';
+        }
+
+        function extractSubmissions(trajJson) {
+            const trajectory = trajJson.trajectory;
+            const submissions = [];
+            
+            // Reconstruct files over time
+            let files = {};
+            let currentFile = null;
+            const runEvents = [];
+            const submitEvents = [];
+
+            for (let i = 0; i < trajectory.length; i++) {
+                const step = trajectory[i];
+                const action = step.action || '';
+                const actionTrimmed = action.trim();
+
+                if (actionTrimmed.startsWith('open ')) {
+                    const parts = actionTrimmed.split(/\s+/);
+                    if (parts.length >= 2) {
+                        currentFile = parts[1].trim();
+                        if (!files[currentFile]) files[currentFile] = [];
+                        
+                        // CRITICAL: Sync file length with observation metadata
+                        const meta = parseFileObservationMeta(step.observation, currentFile);
+                        if (meta) {
+                            files[currentFile] = overlayAndResize(files[currentFile], meta.totalLines, meta.mapping);
+                        }
+                    }
+                } else if (actionTrimmed.startsWith('create ')) {
+                    const parts = actionTrimmed.split(/\s+/);
+                    if (parts.length >= 2) {
+                        const filename = parts[1].trim();
+                        files[filename] = [];
+                        currentFile = filename;
+                        
+                        // CRITICAL: Sync file length with observation metadata
+                        const meta = parseFileObservationMeta(step.observation, currentFile);
+                        if (meta) {
+                            files[currentFile] = overlayAndResize(files[currentFile], meta.totalLines, meta.mapping);
+                        }
+                    }
+                } else if (actionTrimmed.startsWith('edit ')) {
+                    if (!currentFile) continue;
+                    const editResult = parseEditAction(action);
+                    if (editResult) {
+                        if (!files[currentFile]) files[currentFile] = [];
+                        files[currentFile] = applyEdit(files[currentFile], editResult.start, editResult.end, editResult.lines);
+                        
+                        // CRITICAL: Sync file length with observation metadata after edit
+                        const meta = parseFileObservationMeta(step.observation, currentFile);
+                        if (meta) {
+                            files[currentFile] = overlayAndResize(files[currentFile], meta.totalLines, meta.mapping);
+                        }
+                    }
+                } else if (actionTrimmed.startsWith('python ')) {
+                    runEvents.push({
+                        stepIdx: i,
+                        command: actionTrimmed,
+                        snapshots: snapshotFiles(files)
+                    });
+                } else if (actionTrimmed.startsWith('submit')) {
+                    const parts = actionTrimmed.split(/\s+/);
+                    submitEvents.push({
+                        stepIdx: i,
+                        submittedPath: parts.length >= 2 ? parts[1].trim() : ''
+                    });
+                }
+            }
+
+            // Extract scores
+            let scores = [];
+            if (trajJson.info && trajJson.info.score && Array.isArray(trajJson.info.score)) {
+                scores = trajJson.info.score.map(s => s.score).filter(s => typeof s === 'number');
+            }
+
+            // Determine preprocessing boundary: use first submit event (more reliable than first .py file)
+            const firstSubmitIdx = submitEvents.length > 0 ? submitEvents[0].stepIdx : -1;
+            const preprocessEndIdx = firstSubmitIdx > 0 ? firstSubmitIdx - 1 : -1;
+
+            // Add preprocessing section if there are steps before first submit
+            if (preprocessEndIdx > 0) {
+                // Extract python -c fragments from preprocessing steps
+                const pythonFragments = [];
+                for (let i = 0; i <= preprocessEndIdx; i++) {
+                    const step = trajectory[i];
+                    const action = step.action || '';
+                    const actionTrimmed = action.trim();
+                    
+                    if (actionTrimmed.startsWith('python -c')) {
+                        // Extract the inline python code
+                        let match = actionTrimmed.match(/python\s+-c\s+"(.*)"\s*$/s);
+                        if (!match) {
+                            match = actionTrimmed.match(/python\s+-c\s+'(.*)'\s*$/s);
+                        }
+                        if (match) {
+                            const code = match[1].replace(/; /g, ';\n');
+                            pythonFragments.push({
+                                step: i,
+                                code: code
+                            });
+                        }
+                    }
+                }
+                
+                // Build a combined code display with all fragments
+                let combinedCode = '';
+                if (pythonFragments.length > 0) {
+                    combinedCode = pythonFragments.map((frag, idx) => {
+                        return `# Fragment ${idx + 1} (Step ${frag.step})\n${frag.code}\n`;
+                    }).join('\n');
+                } else {
+                    combinedCode = '# No Python code fragments found in preprocessing phase\n';
+                }
+                
+                const preprocessConversation = buildConversation(trajectory, trajJson.history || [], 0, preprocessEndIdx);
+                submissions.push({
+                    attempt: 0, // Special marker for preprocessing
+                    stepIdx: preprocessEndIdx,
+                    score: null,
+                    code: combinedCode,
+                    codeType: 'preprocessing',
+                    command: `${pythonFragments.length} Python fragments`,
+                    runStepIdx: null,
+                    conversation: preprocessConversation,
+                    summary: null,
+                    isPreprocessing: true
+                });
+            }
+
+            // Create submission objects
+            const numSubmissions = submitEvents.length;
+            const startOffset = preprocessEndIdx >= 0 ? preprocessEndIdx : -1;
+
+            for (let attempt = 0; attempt < numSubmissions; attempt++) {
+                const submit = submitEvents[attempt];
+                const score = scores[attempt] || null;
+                
+                // Find last run before this submission
+                const priorRuns = runEvents.filter(r => r.stepIdx < submit.stepIdx);
+                const lastRun = priorRuns[priorRuns.length - 1] || null;
+
+                // Extract code
+                let code = '';
+                let codeType = 'unknown';
+                if (lastRun) {
+                    const codeResult = extractCodeFromCommand(lastRun.command, lastRun.snapshots);
+                    code = codeResult.content || '';
+                    codeType = codeResult.type;
+                }
+
+                // Build conversation - start from AFTER preprocessing for first attempt
+                const prevSubmitIdx = attempt > 0 ? submitEvents[attempt - 1].stepIdx : startOffset;
+                const conversation = buildConversation(trajectory, trajJson.history || [], prevSubmitIdx + 1, submit.stepIdx);
+
+                submissions.push({
+                    attempt: attempt + 1,
+                    stepIdx: submit.stepIdx,
+                    score: score,
+                    code: code,
+                    codeType: codeType,
+                    command: lastRun ? lastRun.command : '',
+                    runStepIdx: lastRun ? lastRun.stepIdx : null,
+                    conversation: conversation,
+                    summary: null, // Will be populated by LLM API call
+                    isPreprocessing: false
+                });
+            }
+
+            return submissions;
+        }
+
+        function snapshotFiles(files) {
+            const snapshots = {};
+            for (const [filename, lines] of Object.entries(files)) {
+                snapshots[filename] = lines.join('\n') + (lines.length > 0 && !lines[lines.length - 1].endsWith('\n') ? '\n' : '');
+            }
+            return snapshots;
+        }
+
+        function parseEditAction(action) {
+            const lines = action.split('\n');
+            const header = lines[0].trim();
+            const match = header.match(/edit\s+(\d+):(\d+)/);
+            if (!match) return null;
+
+            const start = parseInt(match[1]);
+            const end = parseInt(match[2]);
+            const body = [];
+            
+            for (let i = 1; i < lines.length; i++) {
+                if (lines[i].trim() === 'end_of_edit') break;
+                body.push(lines[i]);
+            }
+
+            return { start, end, lines: body };
+        }
+
+        function applyEdit(fileLines, start, end, newLines) {
+            const result = [...fileLines];
+            while (result.length < start - 1) result.push('');
+            while (result.length < end) result.push('');
+            result.splice(start - 1, end - start + 1, ...newLines);
+            return result;
+        }
+
+        function parseFileObservationMeta(observation, expectedFilename) {
+            // Parse observation for [File: ... (N lines total)]
+            if (!observation || typeof observation !== 'string') return null;
+            
+            const lines = observation.split('\n');
+            let headerIdx = null;
+            let totalLines = null;
+            
+            // Find the file header for this specific file
+            const fileHeaderRe = /^\[File:\s+(.+?)\s+\((\d+)\s+lines total\)\]\s*$/;
+            for (let idx = 0; idx < lines.length; idx++) {
+                const match = lines[idx].trim().match(fileHeaderRe);
+                if (match) {
+                    const pathStr = match[1].trim();
+                    if (pathStr.endsWith(expectedFilename)) {
+                        headerIdx = idx;
+                        totalLines = parseInt(match[2]);
+                        break;
+                    }
+                }
+            }
+            
+            if (headerIdx === null || totalLines === null) return null;
+            
+            // Extract visible line numbers and content
+            const mapping = {};
+            const lineNoRe = /^\s*(\d+):(.*)$/;
+            for (let i = headerIdx + 1; i < lines.length; i++) {
+                const line = lines[i];
+                // Stop if another file view begins
+                if (line.trim().startsWith('[File:')) break;
+                
+                const match = line.match(lineNoRe);
+                if (match) {
+                    const lineNo = parseInt(match[1]);
+                    mapping[lineNo] = match[2];
+                }
+            }
+            
+            return { totalLines, mapping };
+        }
+
+        function overlayAndResize(fileLines, totalLines, mapping) {
+            // Resize to exactly totalLines and overlay visible content from mapping
+            let result = [...fileLines];
+            
+            // Resize
+            if (result.length > totalLines) {
+                result = result.slice(0, totalLines);
+            } else if (result.length < totalLines) {
+                while (result.length < totalLines) {
+                    result.push('');
+                }
+            }
+            
+            // Overlay numbered lines we can see in the observation
+            for (const [lineNo, text] of Object.entries(mapping)) {
+                const idx = parseInt(lineNo) - 1;
+                if (idx >= 0 && idx < totalLines) {
+                    result[idx] = text;
+                }
+            }
+            
+            return result;
+        }
+
+        function extractCodeFromCommand(command, snapshots) {
+            const cmd = command.trim();
+            
+            // 1) Handle inline python FIRST (IMPORTANT - matches Python script logic)
+            let match = cmd.match(/python\s+-c\s+"(.*)"\s*$/s);
+            if (match) {
+                const inline = match[1].replace(/; /g, ';\n');
+                return { type: 'inline', content: inline + (inline.endsWith('\n') ? '' : '\n') };
+            }
+
+            match = cmd.match(/python\s+-c\s+'(.*)'\s*$/s);
+            if (match) {
+                const inline = match[1].replace(/; /g, ';\n');
+                return { type: 'inline', content: inline + (inline.endsWith('\n') ? '' : '\n') };
+            }
+
+            // 2) Then handle python script files
+            match = cmd.match(/^python\s+([^\s]+)\s*$/);
+            if (match) {
+                const script = match[1].trim();
+                // Try exact match first
+                if (snapshots[script]) {
+                    return { type: 'file', content: snapshots[script] };
+                }
+                // Try to find matching file (handle potential whitespace issues)
+                for (const [filename, content] of Object.entries(snapshots)) {
+                    if (filename.trim() === script) {
+                        return { type: 'file', content: content };
+                    }
+                }
+                return { type: 'file', content: null };
+            }
+
+            match = cmd.match(/^python\s+([^\s]+)\s+(.+)$/);
+            if (match) {
+                const script = match[1].trim();
+                if (snapshots[script]) {
+                    return { type: 'file', content: snapshots[script] };
+                }
+                for (const [filename, content] of Object.entries(snapshots)) {
+                    if (filename.trim() === script) {
+                        return { type: 'file', content: content };
+                    }
+                }
+                return { type: 'file', content: null };
+            }
+
+            return { type: 'unknown', content: null };
+        }
+
+        function extractThoughtFromResponse(response, action) {
+            // Extract just the thinking/reasoning part, removing embedded actions
+            // Structure is typically: thinking text + </think> + ``` + action + ```
+            let thought = response;
+            
+            if (!thought) return '';
+            
+            // Look for </think> or </think> marker - everything before it is the thought
+            let redactedIndex = thought.indexOf('</think>');
+            if (redactedIndex < 0) {
+                redactedIndex = thought.indexOf('</think>');
+            }
+            if (redactedIndex >= 0) {
+                thought = thought.substring(0, redactedIndex).trim();
+                return thought;
+            }
+            
+            // If no marker, look for code blocks (```) - everything before the first one is the thought
+            const codeBlockIndex = thought.indexOf('```');
+            if (codeBlockIndex >= 0) {
+                thought = thought.substring(0, codeBlockIndex).trim();
+                return thought;
+            }
+            
+            // Fallback: if action is in response, try to remove it
+            if (action) {
+                const actionTrimmed = action.trim();
+                const actionIndex = thought.indexOf(actionTrimmed);
+                if (actionIndex >= 0) {
+                    thought = thought.substring(0, actionIndex).trim();
+                }
+            }
+            
+            return thought;
+        }
+
+        function buildConversation(trajectory, history, startIdx, endIdx) {
+            const entries = [];
+            
+            // Build mapping from trajectory index to history index
+            // Assistant entries in history correspond to trajectory steps
+            const assistantHistoryEntries = (history || []).filter(e => e.role === 'assistant' && e.thought);
+            const userHistoryEntries = (history || []).filter(e => e.role === 'user');
+            
+            // History alternates: system, user, assistant, user, assistant, ...
+            // We need to find user messages that come before each assistant response
+            let historyIdx = 0;
+            let userHistoryIdx = 0;
+            
+            for (let i = startIdx; i <= endIdx; i++) {
+                const step = trajectory[i];
+                
+                // Find corresponding user message in history (comes before assistant)
+                // Since history has a pattern, we need to find the user before the assistant at position i
+                // The mapping: trajectory step i corresponds to assistant entry at position i in filtered list
+                // User entries appear before each assistant in the full history
+                
+                // Get user message that corresponds to this trajectory step
+                // User messages are at indices: 1, 3, 5, 7, ... (after system at 0, then alternating)
+                // Assistant messages are at indices: 2, 4, 6, 8, ...
+                // But we need to account for the initial system message
+                let userContent = null;
+                
+                // Find user entry that precedes the assistant response for this trajectory step
+                // Since trajectory step i corresponds to the (i+1)th assistant (0-indexed), 
+                // the user message is at position (i*2 + 1) in history (after system at 0)
+                if (history && history.length > 0) {
+                    const userHistoryIndex = i * 2 + 1; // User messages are at odd indices after system
+                    if (userHistoryIndex < history.length && history[userHistoryIndex].role === 'user') {
+                        userContent = history[userHistoryIndex].content;
+                    }
+                }
+                
+                // Order: Assistant, Action, Output
+                // Note: User messages in history typically contain the PREVIOUS step's observation,
+                // so we skip them to avoid showing duplicate content
+                
+                const obsContent = step.observation ? step.observation.trim() : '';
+                
+                // Assistant thought/response
+                if (step.response) {
+                    // Extract just the thought, removing embedded action
+                    const thought = extractThoughtFromResponse(step.response, step.action);
+                    if (thought.trim()) {
+                        entries.push({ type: 'assistant', content: thought, step: i });
+                    }
+                }
+                
+                // Action
+                if (step.action) {
+                    entries.push({ type: 'action', content: step.action, step: i });
+                }
+                
+                // Output (observation)
+                if (obsContent) {
+                    entries.push({ type: 'output', content: obsContent, step: i });
+                }
+            }
+            return entries;
+        }
+
+
+        function displaySubmissions() {
+            // Count only actual attempts (not preprocessing)
+            const actualAttempts = submissions.filter(s => !s.isPreprocessing).length;
+            totalSubmissions.textContent = actualAttempts;
+            submissionList.innerHTML = '';
+
+            const bestScore = submissions.reduce((max, s) => s.score !== null && s.score > max ? s.score : max, -Infinity);
+
+            submissions.forEach((sub, index) => {
+                const li = document.createElement('li');
+                li.className = 'submission-item';
+                li.dataset.index = index;
+                
+                const isBest = sub.score !== null && sub.score === bestScore;
+                
+                if (sub.isPreprocessing) {
+                    li.innerHTML = `
+                        <div class="submission-header">📊 Pre-processing</div>
+                        <div class="submission-score" style="font-size: 0.85em;">
+                            Data exploration
+                        </div>
+                    `;
+                } else {
+                    li.innerHTML = `
+                        <div class="submission-header">Attempt ${sub.attempt}</div>
+                        <div class="submission-score">
+                            ${sub.score !== null ? `Score: ${sub.score.toFixed(4)}` : 'Score: N/A'}
+                            ${isBest ? ' ⭐' : ''}
+                        </div>
+                    `;
+                }
+                
+                li.addEventListener('click', () => selectSubmission(index));
+                submissionList.appendChild(li);
+            });
+        }
+
+        function selectSubmission(index) {
+            currentSubmissionIndex = index;
+            const sub = submissions[index];
+
+            // Update active state
+            document.querySelectorAll('.submission-item').forEach((item, i) => {
+                item.classList.toggle('active', i === index);
+            });
+
+            // Show content
+            emptyState.style.display = 'none';
+            contentView.style.display = 'block';
+
+            // Handle preprocessing section differently
+            const codeTab = document.querySelector('[data-tab="code"]');
+            const codeViewer = document.querySelector('.code-viewer');
+            const noCodeMessage = document.getElementById('no-code-message');
+            const summarySection = document.getElementById('summary-section');
+            
+            if (sub.isPreprocessing) {
+                // Show code tab for preprocessing with fragments
+                codeTab.style.display = 'block';
+                codeViewer.style.display = 'block';
+                noCodeMessage.style.display = 'none';
+                summarySection.style.display = 'none';
+                
+                // Update code view for preprocessing
+                document.getElementById('code-filename').textContent = 'Python Code Fragments';
+                document.getElementById('code-score-badge').textContent = sub.command || 'Preprocessing';
+                
+                const codeElement = document.getElementById('code-content');
+                const codeText = sub.code || '# No code fragments';
+                codeElement.textContent = codeText;
+                codeElement.className = 'language-python';
+                
+                // Highlight syntax using Prism with line numbers
+                if (window.Prism && codeText) {
+                    // Clear previous content
+                    const preElement = codeElement.parentElement;
+                    preElement.innerHTML = '';
+                    const newCode = document.createElement('code');
+                    newCode.id = 'code-content';
+                    newCode.className = 'language-python';
+                    newCode.textContent = codeText;
+                    preElement.appendChild(newCode);
+                    
+                    // Apply syntax highlighting
+                    Prism.highlightElement(newCode);
+                }
+                
+                // Default to code tab for preprocessing
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+                document.querySelector('[data-tab="code"]').classList.add('active');
+                document.getElementById('tab-code').classList.add('active');
+            } else {
+                // Show code tab for regular attempts
+                codeTab.style.display = 'block';
+                codeViewer.style.display = 'block';
+                noCodeMessage.style.display = 'none';
+                
+                // Update summary section
+                const summaryContent = document.getElementById('summary-content');
+                const generateBtn = document.getElementById('generate-summary-btn');
+                
+                summarySection.style.display = 'block';
+                if (sub.summary) {
+                    summaryContent.textContent = sub.summary;
+                    summaryContent.classList.remove('summary-loading');
+                } else {
+                    summaryContent.textContent = 'Click "Generate Summary" to get an LLM-generated summary of this attempt\'s approach.';
+                    summaryContent.classList.remove('summary-loading');
+                }
+                
+                // Update button click handler
+                generateBtn.onclick = () => generateSummary(index);
+
+                // Update code view
+                document.getElementById('code-filename').textContent = 
+                    sub.codeType === 'file' ? 'Python File' : sub.codeType === 'inline' ? 'Inline Python Code' : 'Unknown';
+                document.getElementById('code-score-badge').textContent = 
+                    sub.score !== null ? `Score: ${sub.score.toFixed(4)}` : 'Score: N/A';
+                
+                const codeElement = document.getElementById('code-content');
+                const codeText = sub.code || '# No code available for this submission';
+                codeElement.textContent = codeText;
+                codeElement.className = 'language-python';
+                
+                // Highlight syntax using Prism with line numbers
+                if (window.Prism && codeText && codeText !== '# No code available for this submission') {
+                    // Clear previous content
+                    const preElement = codeElement.parentElement;
+                    preElement.innerHTML = '';
+                    const newCode = document.createElement('code');
+                    newCode.id = 'code-content';
+                    newCode.className = 'language-python';
+                    newCode.textContent = codeText;
+                    preElement.appendChild(newCode);
+                    
+                    // Apply syntax highlighting
+                    Prism.highlightElement(newCode);
+                }
+            }
+
+            // Update conversation view
+            const convContent = document.getElementById('conversation-content');
+            convContent.innerHTML = '';
+            if (sub.conversation.length === 0) {
+                convContent.innerHTML = '<div class="empty-state"><p>No conversation available</p></div>';
+            } else {
+                sub.conversation.forEach(entry => {
+                    const div = document.createElement('div');
+                    div.className = `conv-entry ${entry.type}`;
+                    
+                    // Determine if should be collapsed by default (long content)
+                    const shouldCollapse = entry.content.length > 500 && entry.type === 'output';
+                    if (shouldCollapse) {
+                        div.classList.add('collapsed');
+                    }
+                    
+                    div.innerHTML = `
+                        <div class="conv-label">
+                            <span>[Step ${entry.step}] ${entry.type.toUpperCase()}</span>
+                            <span class="conv-toggle">▼</span>
+                        </div>
+                        <div class="conv-content">${escapeHtml(entry.content)}</div>
+                    `;
+                    
+                    // Add click handler to toggle collapse
+                    const label = div.querySelector('.conv-label');
+                    label.addEventListener('click', () => {
+                        div.classList.toggle('collapsed');
+                    });
+                    
+                    convContent.appendChild(div);
+                });
+            }
+
+            // Update metadata
+            const metaContent = document.getElementById('metadata-content');
+            metaContent.innerHTML = `
+                <div class="metadata-item">
+                    <span class="metadata-label">Attempt:</span>
+                    <span>${sub.attempt}</span>
+                </div>
+                <div class="metadata-item">
+                    <span class="metadata-label">Submit Step:</span>
+                    <span>${sub.stepIdx}</span>
+                </div>
+                <div class="metadata-item">
+                    <span class="metadata-label">Run Step:</span>
+                    <span>${sub.runStepIdx !== null ? sub.runStepIdx : 'N/A'}</span>
+                </div>
+                <div class="metadata-item">
+                    <span class="metadata-label">Score:</span>
+                    <span>${sub.score !== null ? sub.score.toFixed(4) : 'N/A'}</span>
+                </div>
+                <div class="metadata-item">
+                    <span class="metadata-label">Command:</span>
+                    <span>${escapeHtml(sub.command || 'N/A')}</span>
+                </div>
+                <div class="metadata-item">
+                    <span class="metadata-label">Code Type:</span>
+                    <span>${sub.codeType}</span>
+                </div>
+            `;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        /**
+         * Generate a summary of the approach taken in a submission using an LLM API.
+         * 
+         * CONFIGURATION REQUIRED:
+         * 1. Set your API endpoint (e.g., OpenAI, Anthropic, or your own proxy)
+         * 2. Set your API key (for security, use environment variables or a backend proxy)
+         * 3. Adjust the prompt as needed
+         * 
+         * SECURITY NOTE: 
+         * Never expose API keys directly in client-side code!
+         * Options:
+         * - Use a backend proxy that handles API keys
+         * - Use environment variables (requires a build step)
+         * - Use a service worker or serverless function
+         */
+        async function generateSummary(submissionIndex) {
+            const sub = submissions[submissionIndex];
+            const summaryContent = document.getElementById('summary-content');
+            const generateBtn = document.getElementById('generate-summary-btn');
+            
+            // Show loading state
+            generateBtn.disabled = true;
+            summaryContent.textContent = 'Generating summary...';
+            summaryContent.classList.add('summary-loading');
+            
+            try {
+                // Build the prompt from conversation and code
+                const conversationText = sub.conversation
+                    .map(entry => `${entry.type.toUpperCase()}: ${entry.content}`)
+                    .join('\n\n');
+                
+                const prompt = `Analyze the following machine learning attempt and provide a high-level summary of the approach taken.
+
+Code:
+\`\`\`python
+${sub.code || 'No code available'}
+\`\`\`
+
+Conversation:
+${conversationText}
+
+Please provide a concise summary (2-3 sentences) of:
+1. What approach/modeling strategy was used
+2. Key techniques or features that were tried
+3. The overall methodology
+
+Summary:`;
+
+                // ===== CONFIGURE YOUR API CALL HERE =====
+                
+                // Option 1: OpenAI API (requires backend proxy for security)
+                const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        // NOTE: API key should come from backend, not here!
+                        // 'Authorization': `Bearer ${YOUR_API_KEY}`
+                    },
+                    body: JSON.stringify({
+                        model: 'gpt-4o-mini', // or 'gpt-4', 'gpt-3.5-turbo', etc.
+                        messages: [
+                            {
+                                role: 'user',
+                                content: prompt
+                            }
+                        ],
+                        max_tokens: 200,
+                        temperature: 0.7
+                    })
+                });
+
+                // Option 2: Use a backend proxy endpoint (RECOMMENDED)
+                // const response = await fetch('/api/summarize', {
+                //     method: 'POST',
+                //     headers: {
+                //         'Content-Type': 'application/json'
+                //     },
+                //     body: JSON.stringify({
+                //         code: sub.code,
+                //         conversation: sub.conversation,
+                //         attempt: sub.attempt,
+                //         score: sub.score
+                //     })
+                // });
+
+                // Option 3: Anthropic Claude API
+                // const response = await fetch('https://api.anthropic.com/v1/messages', {
+                //     method: 'POST',
+                //     headers: {
+                //         'Content-Type': 'application/json',
+                //         'x-api-key': YOUR_API_KEY, // Should be from backend
+                //         'anthropic-version': '2023-06-01'
+                //     },
+                //     body: JSON.stringify({
+                //         model: 'claude-3-haiku-20240307',
+                //         max_tokens: 200,
+                //         messages: [{
+                //             role: 'user',
+                //             content: prompt
+                //         }]
+                //     })
+                // });
+
+                // ==========================================
+
+                if (!response.ok) {
+                    throw new Error(`API call failed: ${response.status} ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                
+                // Extract summary from response (adjust based on your API)
+                let summary = '';
+                if (data.choices && data.choices[0] && data.choices[0].message) {
+                    // OpenAI format
+                    summary = data.choices[0].message.content.trim();
+                } else if (data.content && data.content[0] && data.content[0].text) {
+                    // Anthropic format
+                    summary = data.content[0].text.trim();
+                } else {
+                    summary = JSON.stringify(data); // Fallback for debugging
+                }
+                
+                // Save summary to submission
+                sub.summary = summary;
+                summaryContent.textContent = summary;
+                summaryContent.classList.remove('summary-loading');
+                
+            } catch (error) {
+                console.error('Error generating summary:', error);
+                summaryContent.textContent = `Error generating summary: ${error.message}. Please check your API configuration.`;
+                summaryContent.classList.remove('summary-loading');
+            } finally {
+                generateBtn.disabled = false;
+            }
+        }
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.js"></script>
+</body>
+</html>
