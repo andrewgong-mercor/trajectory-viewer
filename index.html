@@ -791,16 +791,28 @@
             const numSubmissions = submitEvents.length;
             const startOffset = preprocessEndIdx >= 0 ? preprocessEndIdx : -1;
 
-            // Check if first submission failed (no score recorded)
-            // If we have N submits but only N-1 scores, the first submit likely failed
-            const firstSubmitFailed = submitEvents.length > 0 && scores.length === submitEvents.length - 1;
+            // Identify failed submissions by checking observations for errors
+            const failedSubmissions = new Set();
+            for (let i = 0; i < submitEvents.length; i++) {
+                const submitIdx = submitEvents[i].stepIdx;
+                const obs = trajectory[submitIdx].observation || '';
+                const obsLower = obs.toLowerCase();
+                if (obsLower.includes('error') || obsLower.includes('failed') || obsLower.includes('no submission')) {
+                    failedSubmissions.add(i);
+                }
+            }
+            
+            // Map attempts to scores, accounting for failed submissions
+            let scoreIndex = 0;
             
             for (let attempt = 0; attempt < numSubmissions; attempt++) {
                 const submit = submitEvents[attempt];
                 
-                // Adjust score index: if first submit failed, shift scores by 1
-                const scoreIndex = firstSubmitFailed ? attempt - 1 : attempt;
-                const score = scoreIndex >= 0 && scoreIndex < scores.length ? scores[scoreIndex] : null;
+                // Get score: skip if this submission failed
+                const score = failedSubmissions.has(attempt) ? null : (scoreIndex < scores.length ? scores[scoreIndex] : null);
+                if (!failedSubmissions.has(attempt)) {
+                    scoreIndex++; // Only increment for successful submissions
+                }
                 
                 // Find last run before this submission
                 const priorRuns = runEvents.filter(r => r.stepIdx < submit.stepIdx);
