@@ -739,37 +739,47 @@
 
             // Add preprocessing section if there are steps before first submit
             if (preprocessEndIdx > 0) {
-                // Extract python -c fragments from preprocessing steps
-                const pythonFragments = [];
+                // Extract python -c and awk fragments from preprocessing steps
+                const codeFragments = [];
                 for (let i = 0; i <= preprocessEndIdx; i++) {
                     const step = trajectory[i];
                     const action = step.action || '';
                     const actionTrimmed = action.trim();
                     
+                    // Extract python -c code
                     if (actionTrimmed.startsWith('python -c')) {
-                        // Extract the inline python code
                         let match = actionTrimmed.match(/python\s+-c\s+"(.*)"\s*$/s);
                         if (!match) {
                             match = actionTrimmed.match(/python\s+-c\s+'(.*)'\s*$/s);
                         }
                         if (match) {
                             const code = match[1].replace(/; /g, ';\n');
-                            pythonFragments.push({
+                            codeFragments.push({
                                 step: i,
+                                type: 'python',
                                 code: code
                             });
                         }
+                    }
+                    // Extract awk commands
+                    else if (actionTrimmed.includes('awk')) {
+                        codeFragments.push({
+                            step: i,
+                            type: 'awk',
+                            code: actionTrimmed
+                        });
                     }
                 }
                 
                 // Build a combined code display with all fragments
                 let combinedCode = '';
-                if (pythonFragments.length > 0) {
-                    combinedCode = pythonFragments.map((frag, idx) => {
-                        return `# Fragment ${idx + 1} (Step ${frag.step})\n${frag.code}\n`;
+                if (codeFragments.length > 0) {
+                    combinedCode = codeFragments.map((frag, idx) => {
+                        const lang = frag.type === 'python' ? 'Python' : 'AWK';
+                        return `# Fragment ${idx + 1} (Step ${frag.step}) - ${lang}\n${frag.code}\n`;
                     }).join('\n');
                 } else {
-                    combinedCode = '# No Python code fragments found in preprocessing phase\n';
+                    combinedCode = '# No code fragments found in preprocessing phase\n';
                 }
                 
                 const preprocessConversation = buildConversation(trajectory, trajJson.history || [], 0, preprocessEndIdx);
@@ -779,7 +789,7 @@
                     score: null,
                     code: combinedCode,
                     codeType: 'preprocessing',
-                    command: `${pythonFragments.length} Python fragments`,
+                    command: `${codeFragments.length} code fragments`,
                     runStepIdx: null,
                     conversation: preprocessConversation,
                     summary: null,
@@ -818,13 +828,31 @@
                 const priorRuns = runEvents.filter(r => r.stepIdx < submit.stepIdx);
                 const lastRun = priorRuns[priorRuns.length - 1] || null;
 
-                // Extract code
+                // Extract code - collect ALL .py files from the last snapshot
                 let code = '';
                 let codeType = 'unknown';
-                if (lastRun) {
-                    const codeResult = extractCodeFromCommand(lastRun.command, lastRun.snapshots);
-                    code = codeResult.content || '';
-                    codeType = codeResult.type;
+                if (lastRun && lastRun.snapshots) {
+                    // Find all .py files in the snapshot
+                    const pyFiles = Object.entries(lastRun.snapshots)
+                        .filter(([filename, _]) => filename.endsWith('.py'))
+                        .sort((a, b) => a[0].localeCompare(b[0])); // Sort alphabetically
+                    
+                    if (pyFiles.length > 1) {
+                        // Multiple files - combine them with headers
+                        code = pyFiles.map(([filename, content]) => {
+                            return `# ========== ${filename} ==========\n${content}`;
+                        }).join('\n\n');
+                        codeType = 'multiple-files';
+                    } else if (pyFiles.length === 1) {
+                        // Single file - just show it
+                        code = pyFiles[0][1];
+                        codeType = 'file';
+                    } else {
+                        // No .py files, fall back to original logic
+                        const codeResult = extractCodeFromCommand(lastRun.command, lastRun.snapshots);
+                        code = codeResult.content || '';
+                        codeType = codeResult.type;
+                    }
                 }
 
                 // Build conversation - start from AFTER preprocessing for first attempt
@@ -1127,7 +1155,7 @@
                         <div class="submission-header">Attempt ${sub.attempt}</div>
                         <div class="submission-score">
                             ${sub.score !== null ? `Score: ${sub.score.toFixed(4)}` : 'Score: N/A'}
-                            ${isBest ? ' ⭐' : ''}
+                            ${isBest ? '' : ''}
                         </div>
                     `;
                 }
