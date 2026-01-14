@@ -599,6 +599,46 @@
             font-style: italic;
         }
 
+        .summary-progress {
+            width: 100%;
+            height: 4px;
+            background: rgba(102, 126, 234, 0.1);
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 10px;
+            position: relative;
+        }
+
+        .summary-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            border-radius: 2px;
+            transition: width 0.3s ease-out;
+            position: relative;
+        }
+
+        .summary-progress-bar::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.3) 50%, transparent 100%);
+            animation: shimmer 1.5s infinite;
+        }
+
+        @keyframes shimmer {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+
+        .summary-progress-text {
+            font-size: 0.85em;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+
         /* File tabs for multiple Python files */
         .file-tabs-wrapper {
             position: relative;
@@ -806,6 +846,7 @@
         let currentSubmissionIndex = -1;
         let engine = null; // WebLLM engine instance
         let isEngineLoading = false;
+        let currentlyGeneratingIndex = -1; // Track which submission is generating a summary
 
         const trajInput = document.getElementById('traj-input');
         const fileNames = document.getElementById('file-names');
@@ -1201,9 +1242,11 @@
                 let codeFiles = []; // Store separate files for tabbed interface
                 
                 if (lastRun && lastRun.snapshots) {
-                    // Find all .py files in the snapshot
+                    // Find all .py files in the snapshot that have non-empty content
                     const pyFiles = Object.entries(lastRun.snapshots)
-                        .filter(([filename, _]) => filename.endsWith('.py'));
+                        .filter(([filename, content]) => 
+                            filename.endsWith('.py') && content && content.trim().length > 0
+                        );
                     
                     if (pyFiles.length > 1) {
                         // Multiple files - store as array for tabbed interface
@@ -1226,10 +1269,12 @@
                         codeFiles = [{filename: pyFiles[0][0], content: pyFiles[0][1]}];
                         codeType = 'file';
                     } else {
-                        // No .py files, fall back to original logic
+                        // No non-empty .py files, fall back to extracting from command
+                        // This handles cases where files are created but never populated,
+                        // and all code is in python -c commands
                         const codeResult = extractCodeFromCommand(lastRun.command, lastRun.snapshots);
                         code = codeResult.content || '';
-                        codeFiles = code ? [{filename: 'code', content: code}] : [];
+                        codeFiles = code ? [{filename: 'inline_code.py', content: code}] : [];
                         codeType = codeResult.type;
                     }
                 }
@@ -1362,13 +1407,23 @@
             // 1) Handle inline python FIRST (IMPORTANT - matches Python script logic)
             let match = cmd.match(/python\s+-c\s+"(.*)"\s*$/s);
             if (match) {
-                const inline = match[1].replace(/; /g, ';\n');
+                let inline = match[1];
+                // Handle escaped characters
+                inline = inline.replace(/\\n/g, '\n');  // Convert \n to actual newlines
+                inline = inline.replace(/\\t/g, '\t');  // Convert \t to actual tabs
+                inline = inline.replace(/\\"/g, '"');   // Unescape quotes
+                inline = inline.replace(/; /g, ';\n');  // Convert ; to newlines for readability
                 return { type: 'inline', content: inline + (inline.endsWith('\n') ? '' : '\n') };
             }
 
             match = cmd.match(/python\s+-c\s+'(.*)'\s*$/s);
             if (match) {
-                const inline = match[1].replace(/; /g, ';\n');
+                let inline = match[1];
+                // Handle escaped characters
+                inline = inline.replace(/\\n/g, '\n');  // Convert \n to actual newlines
+                inline = inline.replace(/\\t/g, '\t');  // Convert \t to actual tabs
+                inline = inline.replace(/\\'/g, "'");   // Unescape quotes
+                inline = inline.replace(/; /g, ';\n');  // Convert ; to newlines for readability
                 return { type: 'inline', content: inline + (inline.endsWith('\n') ? '' : '\n') };
             }
 
@@ -1515,6 +1570,7 @@
         }
 
         function selectSubmission(index) {
+            // Don't reset currentlyGeneratingIndex - let generation continue in background
             currentSubmissionIndex = index;
             const sub = submissions[index];
 
@@ -1538,7 +1594,6 @@
                 codeTab.style.display = 'block';
                 codeViewer.style.display = 'block';
                 noCodeMessage.style.display = 'none';
-                summarySection.style.display = 'none';
                 
                 // Hide file tabs for preprocessing
                 document.getElementById('file-tabs-container').style.display = 'none';
@@ -1550,11 +1605,46 @@
                 const codeText = sub.code || '# No code fragments';
                 displayCodeContent(codeText);
                 
-                // Default to code tab for preprocessing
+                // Show summary section for preprocessing too
+                const summaryContent = document.getElementById('summary-content');
+                const generateBtn = document.getElementById('generate-summary-btn');
+                
+                summarySection.style.display = 'block';
+                if (currentlyGeneratingIndex === index) {
+                    // This attempt is currently generating in the background
+                    summaryContent.innerHTML = `
+                        <div class="summary-loading">Generating summary...</div>
+                        <div class="summary-progress">
+                            <div class="summary-progress-bar" id="summary-progress-bar" style="width: 50%"></div>
+                        </div>
+                        <div class="summary-progress-text" id="summary-progress-text">In progress...</div>
+                    `;
+                    generateBtn.disabled = true;
+                } else if (currentlyGeneratingIndex !== -1) {
+                    // Another attempt is currently generating
+                    const generatingAttempt = submissions[currentlyGeneratingIndex];
+                    const attemptLabel = generatingAttempt.isPreprocessing ? 'Pre-processing' : `Attempt ${generatingAttempt.attempt}`;
+                    summaryContent.innerHTML = `<div style="color: #6c757d; font-style: italic;">Summary generation is in progress for ${attemptLabel}. Please wait for it to complete before generating another summary.</div>`;
+                    summaryContent.classList.remove('summary-loading');
+                    generateBtn.disabled = true;
+                } else if (sub.summary) {
+                    summaryContent.innerHTML = renderMarkdown(sub.summary);
+                    summaryContent.classList.remove('summary-loading');
+                    generateBtn.disabled = false;
+                } else {
+                    summaryContent.textContent = 'Click "Generate Summary" to get an LLM-generated summary of this phase.';
+                    summaryContent.classList.remove('summary-loading');
+                    generateBtn.disabled = false;
+                }
+                
+                // Update button click handler
+                generateBtn.onclick = () => generateSummary(index);
+                
+                // Default to conversation tab for preprocessing since that's often more interesting
                 document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
                 document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-                document.querySelector('[data-tab="code"]').classList.add('active');
-                document.getElementById('tab-code').classList.add('active');
+                document.querySelector('[data-tab="conversation"]').classList.add('active');
+                document.getElementById('tab-conversation').classList.add('active');
             } else {
                 // Show code tab for regular attempts
                 codeTab.style.display = 'block';
@@ -1566,12 +1656,31 @@
                 const generateBtn = document.getElementById('generate-summary-btn');
                 
                 summarySection.style.display = 'block';
-                if (sub.summary) {
+                if (currentlyGeneratingIndex === index) {
+                    // This attempt is currently generating in the background
+                    summaryContent.innerHTML = `
+                        <div class="summary-loading">Generating summary...</div>
+                        <div class="summary-progress">
+                            <div class="summary-progress-bar" id="summary-progress-bar" style="width: 50%"></div>
+                        </div>
+                        <div class="summary-progress-text" id="summary-progress-text">In progress...</div>
+                    `;
+                    generateBtn.disabled = true;
+                } else if (currentlyGeneratingIndex !== -1) {
+                    // Another attempt is currently generating
+                    const generatingAttempt = submissions[currentlyGeneratingIndex];
+                    const attemptLabel = generatingAttempt.isPreprocessing ? 'Pre-processing' : `Attempt ${generatingAttempt.attempt}`;
+                    summaryContent.innerHTML = `<div style="color: #6c757d; font-style: italic;">Summary generation is in progress for ${attemptLabel}. Please wait for it to complete before generating another summary.</div>`;
+                    summaryContent.classList.remove('summary-loading');
+                    generateBtn.disabled = true;
+                } else if (sub.summary) {
                     summaryContent.innerHTML = renderMarkdown(sub.summary);
                     summaryContent.classList.remove('summary-loading');
+                    generateBtn.disabled = false;
                 } else {
                     summaryContent.textContent = 'Click "Generate Summary" to get an LLM-generated summary of this attempt\'s approach.';
                     summaryContent.classList.remove('summary-loading');
+                    generateBtn.disabled = false;
                 }
                 
                 // Update button click handler
@@ -1816,35 +1925,65 @@
             const summaryContent = document.getElementById('summary-content');
             const generateBtn = document.getElementById('generate-summary-btn');
             
+            // Check if another summary is already being generated
+            if (currentlyGeneratingIndex !== -1) {
+                return; // Don't start a new generation
+            }
+            
+            // Mark this submission as currently generating
+            currentlyGeneratingIndex = submissionIndex;
+            
             // Initialize engine if not already done
             if (!engine && !isEngineLoading) {
-                summaryContent.textContent = 'Initializing AI model (first time)...';
-                summaryContent.classList.add('summary-loading');
+                if (currentlyGeneratingIndex === submissionIndex) {
+                    summaryContent.textContent = 'Initializing AI model (first time)...';
+                    summaryContent.classList.add('summary-loading');
+                }
                 await initializeEngine();
                 if (!engine) {
+                    currentlyGeneratingIndex = -1;
                     return; // Initialization failed
                 }
             }
             
             // Wait for engine if still loading
             if (isEngineLoading) {
-                summaryContent.textContent = 'AI model is still loading, please wait...';
-                summaryContent.classList.add('summary-loading');
+                if (currentlyGeneratingIndex === submissionIndex) {
+                    summaryContent.textContent = 'AI model is still loading, please wait...';
+                    summaryContent.classList.add('summary-loading');
+                }
                 // Poll until loaded
                 while (isEngineLoading) {
                     await new Promise(resolve => setTimeout(resolve, 1000));
+                    // Check if user switched away
+                    if (currentlyGeneratingIndex !== submissionIndex) {
+                        return; // User switched attempts, abort
+                    }
                 }
                 if (!engine) {
-                    summaryContent.textContent = 'AI model failed to load. Please refresh and try again.';
-                    summaryContent.classList.remove('summary-loading');
+                    if (currentlyGeneratingIndex === submissionIndex) {
+                        summaryContent.textContent = 'AI model failed to load. Please refresh and try again.';
+                        summaryContent.classList.remove('summary-loading');
+                    }
+                    currentlyGeneratingIndex = -1;
                     return;
                 }
             }
             
-            // Show loading state
+            // Check if user switched away before we start
+            if (currentlyGeneratingIndex !== submissionIndex) {
+                return;
+            }
+            
+            // Show loading state with progress bar
             generateBtn.disabled = true;
-            summaryContent.textContent = 'Generating summary...';
-            summaryContent.classList.add('summary-loading');
+            summaryContent.innerHTML = `
+                <div class="summary-loading">Generating summary...</div>
+                <div class="summary-progress">
+                    <div class="summary-progress-bar" id="summary-progress-bar" style="width: 0%"></div>
+                </div>
+                <div class="summary-progress-text" id="summary-progress-text">Preparing...</div>
+            `;
             
             try {
                 // Build the prompt from conversation and code (truncate if too long)
@@ -1855,17 +1994,38 @@
                 
                 const codeSnippet = sub.code ? sub.code.slice(0, 2000) : 'No code available';
                 
-                const prompt = `Analyze this AI model's attempt at an ML competition and provide a concise summary.
+                // Get previous attempt code if it exists (skip preprocessing)
+                let prevCodeSnippet = '';
+                if (submissionIndex > 0) {
+                    let prevIndex = submissionIndex - 1;
+                    let prevSub = submissions[prevIndex];
+                    
+                    // Skip backwards to find the last non-preprocessing submission
+                    while (prevSub && prevSub.isPreprocessing && prevIndex > 0) {
+                        prevIndex--;
+                        prevSub = submissions[prevIndex];
+                    }
+                    
+                    if (prevSub && !prevSub.isPreprocessing) {
+                        prevCodeSnippet = prevSub.code ? prevSub.code.slice(0, 2000) : '';
+                    }
+                }
+                
+                // Single unified prompt structure
+                const prompt = `Read this AI model's attempt at an ML competition and provide a concise summary of what it is doing in this attempt. This attempt is one of several attempts within a long trajectory. It may be missing a previous attempt or current attempt code if it is the first or second attempt, in which case you should use the conversation to understand its data exploration and pre-processing steps.
 
-Code:
+Previous Attempt Code:
+${prevCodeSnippet}
+
+Current Attempt Code:
 ${codeSnippet}
 
 Conversation:
 ${conversationText}
 
-In your summary, write 3-5 sentences that capture the key steps taken by the model and the high-level approach.`;
+In your summary, write 3-5 sentences that capture the key steps taken by the model and the high-level approach. Be specific about approaches, libraries, and techniques used to help someone understand how this approach may differ from other approaches. Do not include any other text to preface or conclude the summary.`;
 
-                // Generate summary using WebLLM
+                // Generate summary using WebLLM with streaming
                 const messages = [
                     {
                         role: "system",
@@ -1877,25 +2037,124 @@ In your summary, write 3-5 sentences that capture the key steps taken by the mod
                     }
                 ];
                 
-                const reply = await engine.chat.completions.create({
+                const progressBar = document.getElementById('summary-progress-bar');
+                const progressText = document.getElementById('summary-progress-text');
+                
+                // Update progress to show we're processing
+                if (progressText) progressText.textContent = 'Processing prompt...';
+                if (progressBar) progressBar.style.width = '5%';
+                
+                // Yield to browser to allow UI updates before heavy computation
+                await new Promise(resolve => setTimeout(resolve, 0));
+                
+                // Allow one more frame for rendering
+                await new Promise(resolve => requestAnimationFrame(() => resolve()));
+                
+                // Use streaming for real-time progress
+                // Note: This call does heavy prompt processing via WebGPU
+                const asyncChunkGenerator = await engine.chat.completions.create({
                     messages: messages,
                     temperature: 0.7,
-                    max_tokens: 150,
+                    max_tokens: 300,
+                    stream: true,
                 });
                 
-                const summary = reply.choices[0].message.content.trim();
+                // Update UI to show generation started
+                if (progressText) progressText.textContent = 'Starting generation...';
+                if (progressBar) progressBar.style.width = '10%';
                 
-                // Store and display the summary with markdown rendering
-                sub.summary = summary;
-                summaryContent.innerHTML = renderMarkdown(summary);
-                summaryContent.classList.remove('summary-loading');
+                let summary = '';
+                let tokenCount = 0;
+                const maxTokens = 300;
+                let lastUpdateTime = Date.now();
+                let lastUpdateCount = 0;
+                let lastYieldTime = Date.now();
+                const updateThrottleMs = 100; // Update UI at most every 100ms
+                const updateThrottleTokens = 5; // Or every 5 tokens
+                const yieldThrottleMs = 200; // Yield to browser every 200ms
+                
+                for await (const chunk of asyncChunkGenerator) {
+                    const delta = chunk.choices[0]?.delta?.content || '';
+                    if (delta) {
+                        summary += delta;
+                        tokenCount++;
+                        
+                        // Throttle progress bar updates to reduce DOM manipulation
+                        const now = Date.now();
+                        const timeSinceUpdate = now - lastUpdateTime;
+                        const tokensSinceUpdate = tokenCount - lastUpdateCount;
+                        
+                        // Update only if enough time has passed OR enough tokens generated
+                        if (currentSubmissionIndex === submissionIndex && 
+                            (timeSinceUpdate >= updateThrottleMs || tokensSinceUpdate >= updateThrottleTokens)) {
+                            const progress = Math.min((tokenCount / maxTokens) * 100, 95);
+                            if (progressBar) progressBar.style.width = `${progress}%`;
+                            if (progressText) progressText.textContent = `Generating... ${tokenCount} tokens`;
+                            lastUpdateTime = now;
+                            lastUpdateCount = tokenCount;
+                        }
+                        
+                        // Periodically yield to browser to keep UI responsive
+                        const timeSinceYield = now - lastYieldTime;
+                        if (timeSinceYield >= yieldThrottleMs) {
+                            await new Promise(resolve => setTimeout(resolve, 0));
+                            lastYieldTime = Date.now();
+                        }
+                    }
+                }
+                
+                // Store the summary (always, regardless of current view)
+                sub.summary = summary.trim();
+                
+                // Only update UI if we're still viewing this attempt
+                if (currentSubmissionIndex === submissionIndex) {
+                    // Force a final update to show actual token count
+                    const finalProgressBar = document.getElementById('summary-progress-bar');
+                    const finalProgressText = document.getElementById('summary-progress-text');
+                    if (finalProgressBar) finalProgressBar.style.width = '95%';
+                    if (finalProgressText) finalProgressText.textContent = `Generating... ${tokenCount} tokens`;
+                    
+                    // Brief pause before completion animation
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    
+                    // Complete progress
+                    const currentProgressBar = document.getElementById('summary-progress-bar');
+                    const currentProgressText = document.getElementById('summary-progress-text');
+                    if (currentProgressBar) currentProgressBar.style.width = '100%';
+                    if (currentProgressText) currentProgressText.textContent = 'Complete!';
+                    
+                    // Small delay to show completion
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                    
+                    // Display the summary with markdown rendering
+                    const currentSummaryContent = document.getElementById('summary-content');
+                    if (currentSummaryContent) {
+                        currentSummaryContent.innerHTML = renderMarkdown(sub.summary);
+                        currentSummaryContent.classList.remove('summary-loading');
+                    }
+                }
                 
             } catch (error) {
                 console.error('Error generating summary:', error);
-                summaryContent.textContent = `Error generating summary: ${error.message}. Please try again.`;
-                summaryContent.classList.remove('summary-loading');
+                // Only show error if we're still viewing this attempt
+                if (currentSubmissionIndex === submissionIndex) {
+                    const currentSummaryContent = document.getElementById('summary-content');
+                    if (currentSummaryContent) {
+                        currentSummaryContent.textContent = `Error generating summary: ${error.message}. Please try again.`;
+                        currentSummaryContent.classList.remove('summary-loading');
+                    }
+                }
             } finally {
-                generateBtn.disabled = false;
+                // Always clear generation state when done
+                currentlyGeneratingIndex = -1;
+                
+                // Re-enable button if we're currently viewing this attempt
+                if (currentSubmissionIndex === submissionIndex) {
+                    const currentBtn = document.getElementById('generate-summary-btn');
+                    if (currentBtn) {
+                        currentBtn.disabled = false;
+                    }
+                }
             }
         }
     </script>
