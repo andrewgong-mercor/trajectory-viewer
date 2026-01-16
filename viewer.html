@@ -957,7 +957,7 @@
             
             try {
                 // Show loading state
-                currentFileName.textContent = `Loading trajectory (Model ${model})...`;
+                currentFileName.textContent = `Loading Model ${model} trajectory...`;
                 fileInputWrapper.classList.add('hidden');
                 fileDisplay.classList.add('active');
                 uploadSection.classList.add('collapsed');
@@ -973,8 +973,11 @@
                 
                 const text = await response.text();
                 
-                // Update UI with record ID
-                currentFileName.textContent = `${recordId} (Model ${model})`;
+                // Get dataset name from response header
+                const datasetName = response.headers.get('X-Dataset-Name') || recordId;
+                
+                // Update UI with dataset name
+                currentFileName.textContent = `${datasetName} (Model ${model})`;
                 
                 // Start loading AI model in background
                 if (!engine && !isEngineLoading) {
