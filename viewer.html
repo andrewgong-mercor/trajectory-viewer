@@ -907,6 +907,9 @@
             const file = event.target.files[0];
             if (!file) return;
 
+            // IMPORTANT: Reset all state when loading a new file
+            resetViewerState();
+
             updateFileNames();
             
             // Collapse upload section and show file display
@@ -937,6 +940,33 @@
             reader.readAsText(file);
         }
 
+        function resetViewerState() {
+            // Clear data
+            trajectoryData = null;
+            submissions = [];
+            currentSubmissionIndex = -1;
+            currentlyGeneratingIndex = -1;
+            
+            // Reset UI
+            submissionList.innerHTML = '';
+            totalSubmissions.textContent = '0';
+            
+            // Hide content view and show empty state
+            contentView.style.display = 'none';
+            emptyState.style.display = 'block';
+            
+            // Clear all active selections
+            document.querySelectorAll('.submission-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            
+            // Reset tabs to default (code tab)
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            document.querySelector('[data-tab="code"]').classList.add('active');
+            document.getElementById('tab-code').classList.add('active');
+        }
+
         function updateFileNames() {
             const trajFile = trajInput.files[0]?.name || '';
             if (trajFile) {
@@ -947,23 +977,26 @@
         // Load trajectory file from URL parameter via backend API
         async function loadFromURL() {
             const urlParams = new URLSearchParams(window.location.search);
-            const recordId = urlParams.get('record') || urlParams.get('id');
-            const model = urlParams.get('model') || '1'; // Default to model 1
+            const taskId = urlParams.get('task_id') || urlParams.get('task');
+            const trajectory = urlParams.get('trajectory') || '1'; // Default to trajectory 1
             
-            if (!recordId) return; // No URL parameter, use normal upload flow
+            if (!taskId) return; // No URL parameter, use normal upload flow
+            
+            // IMPORTANT: Reset all state when loading from URL
+            resetViewerState();
             
             // Backend API URL - Cloudflare Worker (always-on, free, fast!)
             const BACKEND_API = 'https://trajectory-api.andrewgong.workers.dev';
             
             try {
                 // Show loading state
-                currentFileName.textContent = `Loading Model ${model} trajectory...`;
+                currentFileName.textContent = `Loading Trajectory ${trajectory}...`;
                 fileInputWrapper.classList.add('hidden');
                 fileDisplay.classList.add('active');
                 uploadSection.classList.add('collapsed');
                 
                 // Fetch the file from the backend
-                const apiUrl = `${BACKEND_API}/api/trajectory/${recordId}?model=${model}`;
+                const apiUrl = `${BACKEND_API}/api/trajectory/${taskId}?trajectory=${trajectory}`;
                 const response = await fetch(apiUrl);
                 
                 if (!response.ok) {
@@ -974,10 +1007,10 @@
                 const text = await response.text();
                 
                 // Get dataset name from response header
-                const datasetName = response.headers.get('X-Dataset-Name') || recordId;
+                const datasetName = response.headers.get('X-Dataset-Name') || taskId;
                 
                 // Update UI with dataset name
-                currentFileName.textContent = `${datasetName} (Model ${model})`;
+                currentFileName.textContent = `${datasetName} (Trajectory ${trajectory})`;
                 
                 // Start loading AI model in background
                 if (!engine && !isEngineLoading) {
@@ -1094,6 +1127,7 @@
             let currentFile = null;
             const runEvents = [];
             const submitEvents = [];
+            const pendingEdits = []; // Store edits that happen before any file is opened
 
             for (let i = 0; i < trajectory.length; i++) {
                 const step = trajectory[i];
@@ -1114,6 +1148,21 @@
                         if (meta) {
                             files[currentFile] = overlayAndResize(files[currentFile], meta.totalLines, meta.mapping);
                         }
+                        
+                        // Apply any pending edits to this file
+                        if (pendingEdits.length > 0) {
+                            console.log(`Applying ${pendingEdits.length} pending edit(s) to ${currentFile}`);
+                            for (const pendingEdit of pendingEdits) {
+                                const currentLines = files[currentFile] || [];
+                                files[currentFile] = applyEdit(currentLines, pendingEdit.start, pendingEdit.end, pendingEdit.lines);
+                                
+                                // Sync with observation metadata if available
+                                if (pendingEdit.meta) {
+                                    files[currentFile] = overlayAndResize(files[currentFile], pendingEdit.meta.totalLines, pendingEdit.meta.mapping);
+                                }
+                            }
+                            pendingEdits.length = 0; // Clear pending edits after applying
+                        }
                     }
                 } else if (actionTrimmed.startsWith('create ')) {
                     const parts = actionTrimmed.split(/\s+/);
@@ -1127,8 +1176,26 @@
                         if (meta) {
                             files[currentFile] = overlayAndResize(files[currentFile], meta.totalLines, meta.mapping);
                         }
+                        
+                        // Apply any pending edits to this newly created file
+                        if (pendingEdits.length > 0) {
+                            console.log(`Applying ${pendingEdits.length} pending edit(s) to newly created ${currentFile}`);
+                            for (const pendingEdit of pendingEdits) {
+                                const currentLines = files[currentFile] || [];
+                                files[currentFile] = applyEdit(currentLines, pendingEdit.start, pendingEdit.end, pendingEdit.lines);
+                                
+                                // Sync with observation metadata if available
+                                if (pendingEdit.meta) {
+                                    files[currentFile] = overlayAndResize(files[currentFile], pendingEdit.meta.totalLines, pendingEdit.meta.mapping);
+                                }
+                            }
+                            pendingEdits.length = 0; // Clear pending edits after applying
+                        }
                     }
                 } else if (actionTrimmed.startsWith('edit ')) {
+                    const editResult = parseEditAction(action);
+                    if (!editResult) continue; // Invalid edit format, skip
+                    
                     // If no file is open, try to infer it from the observation
                     if (!currentFile) {
                         const filenameMatch = step.observation?.match(/\[File:\s*(.+?)\s*\(/);
@@ -1143,21 +1210,28 @@
                                 files[currentFile] = [];
                             }
                         } else {
-                            continue;  // Still can't determine file, skip this edit
+                            // Can't determine file - store as pending edit
+                            console.log(`Step ${i}: Edit without file context - storing as pending`);
+                            const meta = parseFileObservationMeta(step.observation, null);
+                            pendingEdits.push({
+                                start: editResult.start,
+                                end: editResult.end,
+                                lines: editResult.lines,
+                                meta: meta,
+                                stepIdx: i
+                            });
+                            continue;  // Skip to next step
                         }
                     }
                     
-                    const editResult = parseEditAction(action);
-                    if (editResult) {
-                        // Use get with default: files.get(current_file, [])
-                        const currentLines = files[currentFile] || [];
-                        files[currentFile] = applyEdit(currentLines, editResult.start, editResult.end, editResult.lines);
-                        
-                        // CRITICAL: Sync file length with observation metadata after edit
-                        const meta = parseFileObservationMeta(step.observation, currentFile);
-                        if (meta) {
-                            files[currentFile] = overlayAndResize(files[currentFile], meta.totalLines, meta.mapping);
-                        }
+                    // Apply edit to current file
+                    const currentLines = files[currentFile] || [];
+                    files[currentFile] = applyEdit(currentLines, editResult.start, editResult.end, editResult.lines);
+                    
+                    // CRITICAL: Sync file length with observation metadata after edit
+                    const meta = parseFileObservationMeta(step.observation, currentFile);
+                    if (meta) {
+                        files[currentFile] = overlayAndResize(files[currentFile], meta.totalLines, meta.mapping);
                     }
                 } else if (actionTrimmed.startsWith('python ')) {
                     runEvents.push({
@@ -1172,6 +1246,12 @@
                         submittedPath: parts.length >= 2 ? parts[1].trim() : ''
                     });
                 }
+            }
+
+            // Warn if there are still pending edits that were never applied
+            if (pendingEdits.length > 0) {
+                console.warn(`Warning: ${pendingEdits.length} pending edit(s) were never applied (no file was opened after these edits)`);
+                console.warn('Pending edit steps:', pendingEdits.map(e => e.stepIdx).join(', '));
             }
 
             // Extract scores
@@ -1192,6 +1272,7 @@
                     const step = trajectory[i];
                     const action = step.action || '';
                     const actionTrimmed = action.trim();
+                    const observation = step.observation || '';
                     
                     // Extract python -c code
                     if (actionTrimmed.startsWith('python -c')) {
@@ -1204,7 +1285,8 @@
                             codeFragments.push({
                                 step: i,
                                 type: 'python',
-                                code: code
+                                code: code,
+                                output: observation.trim()
                             });
                         }
                     }
@@ -1213,31 +1295,83 @@
                         codeFragments.push({
                             step: i,
                             type: 'awk',
-                            code: actionTrimmed
+                            code: actionTrimmed,
+                            output: observation.trim()
                         });
                     }
                 }
                 
-                // Build a combined code display with all fragments
+                // Get snapshot of all files at the end of preprocessing
+                const preprocessSnapshot = snapshotFiles(files);
+                
+                // Extract .py files from preprocessing snapshot
+                const preprocessPyFiles = Object.entries(preprocessSnapshot)
+                    .filter(([filename, _]) => filename.endsWith('.py'))
+                    .map(([filename, content]) => ({
+                        filename: filename,
+                        content: content
+                    }));
+                
+                // Build codeFiles array: .py files first, then inline fragments
+                let preprocessCodeFiles = [];
                 let combinedCode = '';
+                
+                // Add .py files
+                if (preprocessPyFiles.length > 0) {
+                    preprocessCodeFiles = [...preprocessPyFiles];
+                    combinedCode = preprocessPyFiles.map(file => {
+                        return `# ========== ${file.filename} ==========\n${file.content}`;
+                    }).join('\n\n');
+                }
+                
+                // Add inline fragments section
                 if (codeFragments.length > 0) {
-                    combinedCode = codeFragments.map((frag, idx) => {
+                    const fragmentsCode = codeFragments.map((frag, idx) => {
                         const lang = frag.type === 'python' ? 'Python' : 'AWK';
-                        return `# Fragment ${idx + 1} (Step ${frag.step}) - ${lang}\n${frag.code}\n`;
-                    }).join('\n');
-                } else {
-                    combinedCode = '# No code fragments found in preprocessing phase\n';
+                        let fragment = `# Fragment ${idx + 1} (Step ${frag.step}) - ${lang}\n${frag.code}`;
+                        
+                        // Add output if it exists and is not empty
+                        if (frag.output && frag.output.length > 0) {
+                            fragment += `\n\n# Output (Step ${frag.step})\n${frag.output}`;
+                        }
+                        
+                        return fragment;
+                    }).join('\n\n');
+                    
+                    // Add fragments as a separate "file" for tabbed view
+                    preprocessCodeFiles.push({
+                        filename: 'Exploratory Commands',
+                        content: fragmentsCode
+                    });
+                    
+                    // Also append to combined view
+                    if (combinedCode) {
+                        combinedCode += '\n\n# ========== Inline Fragments ==========\n' + fragmentsCode;
+                    } else {
+                        combinedCode = fragmentsCode;
+                    }
+                }
+                
+                // Fallback if nothing found
+                if (!combinedCode) {
+                    combinedCode = '# No code found in preprocessing phase\n';
+                    preprocessCodeFiles = [{filename: 'preprocessing', content: combinedCode}];
                 }
                 
                 const preprocessConversation = buildConversation(trajectory, trajJson.history || [], 0, preprocessEndIdx);
+                const codeType = preprocessPyFiles.length > 0 ? 'multiple-files' : 'preprocessing';
+                const commandLabel = preprocessPyFiles.length > 0 ? 
+                    `${preprocessPyFiles.length} file${preprocessPyFiles.length > 1 ? 's' : ''} + ${codeFragments.length} fragment${codeFragments.length !== 1 ? 's' : ''}` :
+                    `${codeFragments.length} code fragment${codeFragments.length !== 1 ? 's' : ''}`;
+                
                 submissions.push({
                     attempt: 0, // Special marker for preprocessing
                     stepIdx: preprocessEndIdx,
                     score: null,
                     code: combinedCode,
-                    codeType: 'preprocessing',
-                    codeFiles: [{filename: 'preprocessing', content: combinedCode}],
-                    command: `${codeFragments.length} code fragments`,
+                    codeType: codeType,
+                    codeFiles: preprocessCodeFiles,
+                    command: commandLabel,
                     runStepIdx: null,
                     conversation: preprocessConversation,
                     summary: null,
@@ -1362,7 +1496,18 @@
         function snapshotFiles(files) {
             const snapshots = {};
             for (const [filename, lines] of Object.entries(files)) {
-                snapshots[filename] = lines.join('\n') + (lines.length > 0 && !lines[lines.length - 1].endsWith('\n') ? '\n' : '');
+                // Trim leading blank lines (artifacts from line number padding)
+                let trimmedLines = [...lines];
+                while (trimmedLines.length > 0 && trimmedLines[0].trim() === '') {
+                    trimmedLines.shift();
+                }
+                
+                // Trim trailing blank lines
+                while (trimmedLines.length > 0 && trimmedLines[trimmedLines.length - 1].trim() === '') {
+                    trimmedLines.pop();
+                }
+                
+                snapshots[filename] = trimmedLines.join('\n') + (trimmedLines.length > 0 ? '\n' : '');
             }
             return snapshots;
         }
@@ -1638,20 +1783,51 @@
             const summarySection = document.getElementById('summary-section');
             
             if (sub.isPreprocessing) {
-                // Show code tab for preprocessing with fragments
+                // Show code tab for preprocessing
                 codeTab.style.display = 'block';
                 codeViewer.style.display = 'block';
                 noCodeMessage.style.display = 'none';
                 
-                // Hide file tabs for preprocessing
-                document.getElementById('file-tabs-container').style.display = 'none';
+                // Handle multiple files with tabs (same as regular attempts)
+                const fileTabsContainer = document.getElementById('file-tabs-container');
                 
-                // Update code view for preprocessing
-                document.getElementById('code-filename').textContent = 'Python Code Fragments';
-                document.getElementById('code-score-badge').textContent = sub.command || 'Preprocessing';
-                
-                const codeText = sub.code || '# No code fragments';
-                displayCodeContent(codeText);
+                if (sub.codeFiles && sub.codeFiles.length > 1) {
+                    // Multiple files - show file tabs
+                    fileTabsContainer.style.display = 'block';
+                    fileTabsContainer.innerHTML = '<div class="file-tabs-wrapper">' +
+                        '<div class="file-tabs">' +
+                        sub.codeFiles.map((file, idx) => 
+                            `<button class="file-tab ${idx === 0 ? 'active' : ''}" data-file-index="${idx}">${file.filename}</button>`
+                        ).join('') +
+                        '</div>' +
+                        `<span class="file-tab-count">${sub.codeFiles.length} file${sub.codeFiles.length > 1 ? 's' : ''}</span>` +
+                        '</div>';
+                    
+                    // Add click handlers for file tabs
+                    fileTabsContainer.querySelectorAll('.file-tab').forEach(tab => {
+                        tab.addEventListener('click', () => {
+                            const fileIndex = parseInt(tab.dataset.fileIndex);
+                            showCodeFile(sub, fileIndex);
+                            // Update active tab
+                            fileTabsContainer.querySelectorAll('.file-tab').forEach(t => t.classList.remove('active'));
+                            tab.classList.add('active');
+                        });
+                    });
+                    
+                    // Show first file by default
+                    showCodeFile(sub, 0);
+                } else {
+                    // Single file - hide tabs
+                    fileTabsContainer.style.display = 'none';
+                    
+                    // Update code view for single file/fragments
+                    const filename = sub.codeFiles && sub.codeFiles.length === 1 ? sub.codeFiles[0].filename : 'Preprocessing';
+                    document.getElementById('code-filename').textContent = filename;
+                    document.getElementById('code-score-badge').textContent = sub.command || 'Preprocessing';
+                    
+                    const codeText = sub.code || '# No code found';
+                    displayCodeContent(codeText);
+                }
                 
                 // Show summary section for preprocessing too
                 const summaryContent = document.getElementById('summary-content');
@@ -1847,8 +2023,15 @@
             // Display a specific file from the codeFiles array
             const file = sub.codeFiles[fileIndex];
             document.getElementById('code-filename').textContent = file.filename;
-            document.getElementById('code-score-badge').textContent = 
-                sub.score !== null ? `Score: ${sub.score.toFixed(4)}` : 'Score: N/A';
+            
+            // For preprocessing, show the command label instead of score
+            if (sub.isPreprocessing) {
+                document.getElementById('code-score-badge').textContent = sub.command || 'Preprocessing';
+            } else {
+                document.getElementById('code-score-badge').textContent = 
+                    sub.score !== null ? `Score: ${sub.score.toFixed(4)}` : 'Score: N/A';
+            }
+            
             displayCodeContent(file.content);
         }
 
