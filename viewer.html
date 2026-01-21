@@ -979,22 +979,29 @@
             const urlParams = new URLSearchParams(window.location.search);
             const taskId = urlParams.get('task_id') || urlParams.get('task');
             const trajectory = urlParams.get('trajectory') || '1'; // Default to trajectory 1
-            
+            const source = urlParams.get('source') || 'airtable'; // Default to airtable for backwards compatibility
+
             if (!taskId) return; // No URL parameter, use normal upload flow
-            
+
             // IMPORTANT: Reset all state when loading from URL
             resetViewerState();
-            
-            // Backend API URL - Cloudflare Worker (always-on, free, fast!)
-            const BACKEND_API = 'https://trajectory-api.andrewgong.workers.dev';
-            
+
+            // Backend API URLs - Cloudflare Workers (always-on, free, fast!)
+            const BACKEND_APIS = {
+                'airtable': 'https://trajectory-api.andrewgong.workers.dev',
+                'studio': 'https://trajectory-studio-api.andrewgong.workers.dev'
+            };
+
+            const BACKEND_API = BACKEND_APIS[source] || BACKEND_APIS['airtable'];
+
             try {
                 // Show loading state
-                currentFileName.textContent = `Loading Trajectory ${trajectory}...`;
+                const sourceLabel = source === 'studio' ? 'Studio' : 'Airtable';
+                currentFileName.textContent = `Loading Trajectory ${trajectory} from ${sourceLabel}...`;
                 fileInputWrapper.classList.add('hidden');
                 fileDisplay.classList.add('active');
                 uploadSection.classList.add('collapsed');
-                
+
                 // Fetch the file from the backend
                 const apiUrl = `${BACKEND_API}/api/trajectory/${taskId}?trajectory=${trajectory}`;
                 const response = await fetch(apiUrl);
