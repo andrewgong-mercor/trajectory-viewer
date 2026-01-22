@@ -1025,6 +1025,7 @@
                     isFromAirtableAPI = true;
                     const metricLowerHeader = response.headers.get('X-Metric-Lower-Is-Better');
                     metricLowerIsBetter = metricLowerHeader === 'true';
+                    console.log('Airtable API loaded - isFromAirtableAPI:', isFromAirtableAPI, 'metricLowerIsBetter:', metricLowerIsBetter, 'header value:', metricLowerHeader);
                 }
 
                 // Update UI with dataset name
@@ -1749,6 +1750,7 @@
             const validScores = submissions.filter(s => s.score !== null).map(s => s.score);
             const uniqueScores = [...new Set(validScores)];
             const shouldShowStar = isFromAirtableAPI && uniqueScores.length > 1; // Only show if from Airtable and scores differ
+            console.log('displaySubmissions - isFromAirtableAPI:', isFromAirtableAPI, 'uniqueScores:', uniqueScores.length, 'shouldShowStar:', shouldShowStar);
 
             // Determine best score based on metric direction
             let bestScore;
