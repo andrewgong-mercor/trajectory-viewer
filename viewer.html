@@ -847,6 +847,8 @@
         let engine = null; // WebLLM engine instance
         let isEngineLoading = false;
         let currentlyGeneratingIndex = -1; // Track which submission is generating a summary
+        let isFromAirtableAPI = false; // Track if data came from Airtable API
+        let metricLowerIsBetter = false; // Track if lower scores are better (from Airtable)
 
         const trajInput = document.getElementById('traj-input');
         const fileNames = document.getElementById('file-names');
@@ -946,6 +948,8 @@
             submissions = [];
             currentSubmissionIndex = -1;
             currentlyGeneratingIndex = -1;
+            isFromAirtableAPI = false;
+            metricLowerIsBetter = false;
             
             // Reset UI
             submissionList.innerHTML = '';
@@ -1012,10 +1016,17 @@
                 }
                 
                 const text = await response.text();
-                
+
                 // Get dataset name from response header
                 const datasetName = response.headers.get('X-Dataset-Name') || taskId;
-                
+
+                // Get metric direction from Airtable API (only for airtable source)
+                if (source === 'airtable') {
+                    isFromAirtableAPI = true;
+                    const metricLowerHeader = response.headers.get('X-Metric-Lower-Is-Better');
+                    metricLowerIsBetter = metricLowerHeader === 'true';
+                }
+
                 // Update UI with dataset name
                 currentFileName.textContent = `${datasetName} (Trajectory ${trajectory})`;
                 
@@ -1734,19 +1745,26 @@
             totalSubmissions.textContent = actualAttempts;
             submissionList.innerHTML = '';
 
-            // Calculate best score - only show "best" badge if there are different scores
+            // Calculate best score - only show star if data came from Airtable API and scores differ
             const validScores = submissions.filter(s => s.score !== null).map(s => s.score);
             const uniqueScores = [...new Set(validScores)];
-            const shouldShowBest = uniqueScores.length > 1; // Only show if scores differ
-            const bestScore = validScores.length > 0 ? Math.max(...validScores) : -Infinity;
+            const shouldShowStar = isFromAirtableAPI && uniqueScores.length > 1; // Only show if from Airtable and scores differ
+
+            // Determine best score based on metric direction
+            let bestScore;
+            if (metricLowerIsBetter) {
+                bestScore = validScores.length > 0 ? Math.min(...validScores) : Infinity;
+            } else {
+                bestScore = validScores.length > 0 ? Math.max(...validScores) : -Infinity;
+            }
 
             submissions.forEach((sub, index) => {
                 const li = document.createElement('li');
                 li.className = 'submission-item';
                 li.dataset.index = index;
-                
-                const isBest = shouldShowBest && sub.score !== null && sub.score === bestScore;
-                
+
+                const isBest = shouldShowStar && sub.score !== null && sub.score === bestScore;
+
                 if (sub.isPreprocessing) {
                     li.innerHTML = `
                         <div class="submission-header">Pre-processing</div>
@@ -1759,11 +1777,11 @@
                         <div class="submission-header">Attempt ${sub.attempt}</div>
                         <div class="submission-score">
                             ${sub.score !== null ? `Score: ${sub.score.toFixed(4)}` : 'Score: N/A'}
-                            ${isBest ? '' : ''}
+                            ${isBest ? ' ★' : ''}
                         </div>
                     `;
                 }
-                
+
                 li.addEventListener('click', () => selectSubmission(index));
                 submissionList.appendChild(li);
             });
