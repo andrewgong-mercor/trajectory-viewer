@@ -1474,12 +1474,15 @@
             // Determine preprocessing boundary: use first submit event (more reliable than first .py file)
             const firstSubmitIdx = submitEvents.length > 0 ? submitEvents[0].stepIdx : -1;
             const preprocessEndIdx = firstSubmitIdx > 0 ? firstSubmitIdx - 1 : -1;
+            const hasNoSubmits = submitEvents.length === 0;
 
             // Add preprocessing section if there are steps before first submit
-            if (preprocessEndIdx > 0) {
+            // If there are no submits at all, show the entire trajectory as preprocessing
+            const preprocessRangeEnd = hasNoSubmits ? (trajectory.length - 1) : preprocessEndIdx;
+            if (preprocessRangeEnd > 0) {
                 // Extract python -c and awk fragments from preprocessing steps
                 const codeFragments = [];
-                for (let i = 0; i <= preprocessEndIdx; i++) {
+                for (let i = 0; i <= preprocessRangeEnd; i++) {
                     const step = trajectory[i];
                     const action = step.action || '';
                     const actionTrimmed = action.trim();
@@ -1569,7 +1572,7 @@
                     preprocessCodeFiles = [{filename: 'preprocessing', content: combinedCode}];
                 }
                 
-                const preprocessConversation = buildConversation(trajectory, trajJson.history || [], 0, preprocessEndIdx);
+                const preprocessConversation = buildConversation(trajectory, trajJson.history || [], 0, preprocessRangeEnd);
                 const codeType = preprocessPyFiles.length > 0 ? 'multiple-files' : 'preprocessing';
                 const commandLabel = preprocessPyFiles.length > 0 ? 
                     `${preprocessPyFiles.length} file${preprocessPyFiles.length > 1 ? 's' : ''} + ${codeFragments.length} fragment${codeFragments.length !== 1 ? 's' : ''}` :
@@ -1592,7 +1595,7 @@
 
             // Create submission objects
             const numSubmissions = submitEvents.length;
-            const startOffset = preprocessEndIdx >= 0 ? preprocessEndIdx : -1;
+            const startOffset = preprocessRangeEnd >= 0 ? preprocessRangeEnd : -1;
 
             // Identify failed submissions by checking observations for errors
             const failedSubmissions = new Set();
