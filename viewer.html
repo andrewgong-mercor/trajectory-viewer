@@ -1064,7 +1064,7 @@
             // Extract primary filename from command (e.g., "python train.py" -> "train.py")
             let primaryFile = null;
             if (command) {
-                const match = command.match(/python\s+([^\s]+\.py)/);
+                const match = command.match(/python(?:3)?\s+([^\s]+\.py)/);
                 if (match) {
                     primaryFile = match[1].trim();
                 }
@@ -1147,10 +1147,208 @@
             const submitEvents = [];
             const pendingEdits = []; // Store edits that happen before any file is opened
 
+            function extractCodeBlocks(text) {
+                if (!text || typeof text !== 'string') return [];
+                const blocks = [];
+                const re = /```([\s\S]*?)```/g;
+                let match;
+                while ((match = re.exec(text)) !== null) {
+                    blocks.push(match[1]);
+                }
+                return blocks;
+            }
+
+            function normalizeFilename(raw) {
+                if (!raw) return raw;
+                return raw.trim().replace(/^["']|["']$/g, '');
+            }
+
+            function looksLikeNumberedLines(blockText) {
+                if (!blockText || typeof blockText !== 'string') return false;
+                const lines = blockText.split('\n').filter(l => l.trim().length > 0);
+                if (lines.length < 3) return false;
+                const numbered = lines.filter(l => /^\s*\d+[: ]/.test(l)).length;
+                return numbered / lines.length >= 0.6;
+            }
+
+            function parseNumberedLines(blockText) {
+                const mapping = {};
+                let maxLine = 0;
+                const lines = blockText.split('\n');
+                for (const line of lines) {
+                    const match = line.match(/^\s*(\d+)[: ](.*)$/);
+                    if (match) {
+                        const lineNo = parseInt(match[1]);
+                        mapping[lineNo] = match[2];
+                        if (lineNo > maxLine) maxLine = lineNo;
+                    }
+                }
+                return { mapping, maxLine };
+            }
+
+            function parseResponseActions(responseText) {
+                const actions = [];
+                const blocks = extractCodeBlocks(responseText);
+                for (const block of blocks) {
+                    const trimmed = block.trim();
+                    if (!trimmed) continue;
+                    const lines = trimmed.split('\n');
+                    const first = lines[0].trim();
+                    
+                    if (first.startsWith('open ')) {
+                        const parts = first.split(/\s+/);
+                        if (parts.length >= 2) {
+                            actions.push({ type: 'open', filename: normalizeFilename(parts[1]) });
+                        }
+                        continue;
+                    }
+                    
+                    if (first.startsWith('create ')) {
+                        const parts = first.split(/\s+/);
+                        if (parts.length >= 2) {
+                            const filename = normalizeFilename(parts[1]);
+                            const contentLines = lines.slice(1);
+                            actions.push({ type: 'create', filename, contentLines });
+                        }
+                        continue;
+                    }
+                    
+                    if (first.startsWith('edit ')) {
+                        const match = first.match(/edit\s+(\d+):(\d+)/);
+                        if (match) {
+                            const start = parseInt(match[1]);
+                            const end = parseInt(match[2]);
+                            const contentLines = lines.slice(1);
+                            actions.push({ type: 'edit', start, end, lines: contentLines });
+                        }
+                        continue;
+                    }
+                    
+                    if (looksLikeNumberedLines(trimmed)) {
+                        const parsed = parseNumberedLines(trimmed);
+                        actions.push({ type: 'fileview', mapping: parsed.mapping, totalLines: parsed.maxLine });
+                    }
+                }
+                return actions;
+            }
+
+            function parseAnyFileObservationMeta(observation) {
+                if (!observation || typeof observation !== 'string') return null;
+                const lines = observation.split('\n');
+                const fileHeaderRe = /^\[File:\s+(.+?)\s+\((\d+)\s+lines total\)\]\s*$/;
+                for (let idx = 0; idx < lines.length; idx++) {
+                    const match = lines[idx].trim().match(fileHeaderRe);
+                    if (match) {
+                        const pathStr = match[1].trim();
+                        const filename = pathStr.includes('/') ? pathStr.split('/').pop() : pathStr;
+                        const totalLines = parseInt(match[2]);
+                        const mapping = {};
+                        const lineNoRe = /^\s*(\d+):(.*)$/;
+                        for (let i = idx + 1; i < lines.length; i++) {
+                            const line = lines[i];
+                            if (line.trim().startsWith('[File:')) break;
+                            const lnMatch = line.match(lineNoRe);
+                            if (lnMatch) {
+                                const lineNo = parseInt(lnMatch[1]);
+                                mapping[lineNo] = lnMatch[2];
+                            }
+                        }
+                        return { filename, totalLines, mapping };
+                    }
+                }
+                return null;
+            }
+
+            function applyPendingEditsIfAny() {
+                if (!currentFile || pendingEdits.length === 0) return;
+                console.log(`Applying ${pendingEdits.length} pending edit(s) to ${currentFile}`);
+                for (const pendingEdit of pendingEdits) {
+                    const currentLines = files[currentFile] || [];
+                    files[currentFile] = applyEdit(currentLines, pendingEdit.start, pendingEdit.end, pendingEdit.lines);
+                    
+                    if (pendingEdit.meta) {
+                        files[currentFile] = overlayAndResize(files[currentFile], pendingEdit.meta.totalLines, pendingEdit.meta.mapping);
+                    }
+                }
+                pendingEdits.length = 0;
+            }
+
+            function applyResponseActions(responseActions, step, stepIdx) {
+                if (!responseActions || responseActions.length === 0) return;
+                for (const ra of responseActions) {
+                    if (ra.type === 'open') {
+                        currentFile = ra.filename;
+                        if (!(currentFile in files)) {
+                            files[currentFile] = [];
+                        }
+                        applyPendingEditsIfAny();
+                        continue;
+                    }
+                    if (ra.type === 'create') {
+                        currentFile = ra.filename;
+                        if (!(currentFile in files)) {
+                            files[currentFile] = [];
+                        }
+                        if (ra.contentLines && ra.contentLines.length > 0) {
+                            files[currentFile] = [...ra.contentLines];
+                        }
+                        applyPendingEditsIfAny();
+                        continue;
+                    }
+                    if (ra.type === 'edit') {
+                        if (!currentFile) {
+                            const metaAny = parseAnyFileObservationMeta(step.observation);
+                            if (metaAny) {
+                                currentFile = metaAny.filename;
+                                if (!(currentFile in files)) {
+                                    files[currentFile] = [];
+                                }
+                            }
+                        }
+                        if (!currentFile) {
+                            console.log(`Step ${stepIdx}: Response edit without file context - storing as pending`);
+                            pendingEdits.push({
+                                start: ra.start,
+                                end: ra.end,
+                                lines: ra.lines,
+                                meta: null,
+                                stepIdx: stepIdx
+                            });
+                            continue;
+                        }
+                        const currentLines = files[currentFile] || [];
+                        files[currentFile] = applyEdit(currentLines, ra.start, ra.end, ra.lines);
+                        continue;
+                    }
+                    if (ra.type === 'fileview') {
+                        if (!currentFile) {
+                            const metaAny = parseAnyFileObservationMeta(step.observation);
+                            if (metaAny) {
+                                currentFile = metaAny.filename;
+                                if (!(currentFile in files)) {
+                                    files[currentFile] = [];
+                                }
+                            }
+                        }
+                        if (currentFile) {
+                            files[currentFile] = overlayAndResize(files[currentFile], ra.totalLines, ra.mapping);
+                        }
+                    }
+                }
+            }
+
             for (let i = 0; i < trajectory.length; i++) {
                 const step = trajectory[i];
                 const action = step.action || '';
                 const actionTrimmed = action.trim();
+                const responseActions = parseResponseActions(step.response || '');
+                const actionIsFileOp = actionTrimmed.startsWith('open ') || actionTrimmed.startsWith('create ') || actionTrimmed.startsWith('edit ');
+                const actionIsFileView = looksLikeNumberedLines(actionTrimmed);
+                const processResponseFirst = responseActions.length > 0 && !(actionIsFileOp || actionIsFileView);
+
+                if (processResponseFirst) {
+                    applyResponseActions(responseActions, step, i);
+                }
 
                 if (actionTrimmed.startsWith('open ')) {
                     const parts = actionTrimmed.split(/\s+/);
@@ -1168,19 +1366,7 @@
                         }
                         
                         // Apply any pending edits to this file
-                        if (pendingEdits.length > 0) {
-                            console.log(`Applying ${pendingEdits.length} pending edit(s) to ${currentFile}`);
-                            for (const pendingEdit of pendingEdits) {
-                                const currentLines = files[currentFile] || [];
-                                files[currentFile] = applyEdit(currentLines, pendingEdit.start, pendingEdit.end, pendingEdit.lines);
-                                
-                                // Sync with observation metadata if available
-                                if (pendingEdit.meta) {
-                                    files[currentFile] = overlayAndResize(files[currentFile], pendingEdit.meta.totalLines, pendingEdit.meta.mapping);
-                                }
-                            }
-                            pendingEdits.length = 0; // Clear pending edits after applying
-                        }
+                        applyPendingEditsIfAny();
                     }
                 } else if (actionTrimmed.startsWith('create ')) {
                     const parts = actionTrimmed.split(/\s+/);
@@ -1196,19 +1382,7 @@
                         }
                         
                         // Apply any pending edits to this newly created file
-                        if (pendingEdits.length > 0) {
-                            console.log(`Applying ${pendingEdits.length} pending edit(s) to newly created ${currentFile}`);
-                            for (const pendingEdit of pendingEdits) {
-                                const currentLines = files[currentFile] || [];
-                                files[currentFile] = applyEdit(currentLines, pendingEdit.start, pendingEdit.end, pendingEdit.lines);
-                                
-                                // Sync with observation metadata if available
-                                if (pendingEdit.meta) {
-                                    files[currentFile] = overlayAndResize(files[currentFile], pendingEdit.meta.totalLines, pendingEdit.meta.mapping);
-                                }
-                            }
-                            pendingEdits.length = 0; // Clear pending edits after applying
-                        }
+                        applyPendingEditsIfAny();
                     }
                 } else if (actionTrimmed.startsWith('edit ')) {
                     const editResult = parseEditAction(action);
@@ -1251,7 +1425,7 @@
                     if (meta) {
                         files[currentFile] = overlayAndResize(files[currentFile], meta.totalLines, meta.mapping);
                     }
-                } else if (actionTrimmed.startsWith('python ')) {
+                } else if (actionTrimmed.startsWith('python ') || actionTrimmed.startsWith('python3 ')) {
                     runEvents.push({
                         stepIdx: i,
                         command: actionTrimmed,
@@ -1263,6 +1437,25 @@
                         stepIdx: i,
                         submittedPath: parts.length >= 2 ? parts[1].trim() : ''
                     });
+                } else if (actionIsFileView) {
+                    // Some newer trajectories store file views directly in action
+                    if (!currentFile) {
+                        const metaAny = parseAnyFileObservationMeta(step.observation);
+                        if (metaAny) {
+                            currentFile = metaAny.filename;
+                            if (!(currentFile in files)) {
+                                files[currentFile] = [];
+                            }
+                        }
+                    }
+                    if (currentFile) {
+                        const parsed = parseNumberedLines(actionTrimmed);
+                        files[currentFile] = overlayAndResize(files[currentFile], parsed.maxLine, parsed.mapping);
+                    }
+                }
+
+                if (!processResponseFirst) {
+                    applyResponseActions(responseActions, step, i);
                 }
             }
 
@@ -1626,20 +1819,20 @@
             const cmd = command.trim();
             
             // 1) Handle inline python FIRST (IMPORTANT - matches Python script logic)
-            let match = cmd.match(/python\s+-c\s+"(.*)"\s*$/s);
+            let match = cmd.match(/python(?:3)?\s+-c\s+"(.*)"\s*$/s);
             if (match) {
                 const inline = match[1].replace(/; /g, ';\n');
                 return { type: 'inline', content: inline + (inline.endsWith('\n') ? '' : '\n') };
             }
 
-            match = cmd.match(/python\s+-c\s+'(.*)'\s*$/s);
+            match = cmd.match(/python(?:3)?\s+-c\s+'(.*)'\s*$/s);
             if (match) {
                 const inline = match[1].replace(/; /g, ';\n');
                 return { type: 'inline', content: inline + (inline.endsWith('\n') ? '' : '\n') };
             }
 
             // 2) Then handle python script files
-            match = cmd.match(/^python\s+([^\s]+)\s*$/);
+            match = cmd.match(/^python(?:3)?\s+([^\s]+)\s*$/);
             if (match) {
                 const script = match[1].trim();
                 // Try exact match first
@@ -1655,7 +1848,7 @@
                 return { type: 'file', content: null };
             }
 
-            match = cmd.match(/^python\s+([^\s]+)\s+(.+)$/);
+            match = cmd.match(/^python(?:3)?\s+([^\s]+)\s+(.+)$/);
             if (match) {
                 const script = match[1].trim();
                 if (snapshots[script]) {
