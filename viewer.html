@@ -1589,7 +1589,8 @@
                     runStepIdx: null,
                     conversation: preprocessConversation,
                     summary: null,
-                    isPreprocessing: true
+                    isPreprocessing: true,
+                    failedSubmission: false
                 });
             }
 
@@ -1701,7 +1702,8 @@
                     runStepIdx: lastRun ? lastRun.stepIdx : null,
                     conversation: conversation,
                     summary: null, // Will be populated by LLM API call
-                    isPreprocessing: false
+                    isPreprocessing: false,
+                    failedSubmission: failedSubmissions.has(attempt)
                 });
             }
 
@@ -1974,6 +1976,7 @@
                         <div class="submission-header">Attempt ${sub.attempt}</div>
                         <div class="submission-score">
                             ${sub.score !== null ? `Score: ${sub.score.toFixed(4)}` : 'Score: N/A'}
+                            ${sub.score === null && sub.failedSubmission ? '<span style="margin-left: 6px; color: #c94f4f; font-weight: 500;">(Failed submission score)</span>' : ''}
                             ${isBest ? ' ★' : ''}
                         </div>
                     `;
@@ -2228,7 +2231,7 @@
                 </div>
                 <div class="metadata-item">
                     <span class="metadata-label">Score:</span>
-                    <span>${sub.score !== null ? sub.score.toFixed(4) : 'N/A'}</span>
+                    <span>${sub.score !== null ? sub.score.toFixed(4) : (sub.failedSubmission ? 'N/A (Failed submission score)' : 'N/A')}</span>
                 </div>
                 <div class="metadata-item">
                     <span class="metadata-label">Command:</span>
