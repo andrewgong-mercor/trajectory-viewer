@@ -1684,7 +1684,8 @@
 
                 // Build conversation - start from AFTER preprocessing for first attempt
                 const prevSubmitIdx = attempt > 0 ? submitEvents[attempt - 1].stepIdx : startOffset;
-                const conversation = buildConversation(trajectory, trajJson.history || [], prevSubmitIdx + 1, submit.stepIdx);
+                const endIdx = (attempt === numSubmissions - 1) ? (trajectory.length - 1) : submit.stepIdx;
+                const conversation = buildConversation(trajectory, trajJson.history || [], prevSubmitIdx + 1, endIdx);
 
                 submissions.push({
                     attempt: attempt + 1,
