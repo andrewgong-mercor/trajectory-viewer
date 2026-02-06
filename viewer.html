@@ -846,6 +846,8 @@
         let currentSubmissionIndex = -1;
         let engine = null; // WebLLM engine instance
         let isEngineLoading = false;
+        let isEngineReady = false;
+        const MODEL_NAME = "Llama-3.2-3B-Instruct-q4f32_1-MLC";
         let currentlyGeneratingIndex = -1; // Track which submission is generating a summary
         let isFromAirtableAPI = false; // Track if data came from Airtable API
         let metricLowerIsBetter = false; // Track if lower scores are better (from Airtable)
@@ -2309,6 +2311,7 @@
             if (engine || isEngineLoading) return;
             
             isEngineLoading = true;
+            isEngineReady = false;
             const modelStatus = document.getElementById('model-status');
             
             try {
@@ -2331,7 +2334,7 @@
                 
                 // Create engine with progress callback
                 engine = await window.webllm.CreateMLCEngine(
-                    "Llama-3.2-3B-Instruct-q4f32_1-MLC", // Smaller, faster model
+                    MODEL_NAME, // Smaller, faster model
                     {
                         initProgressCallback: (progress) => {
                             if (modelStatus) {
@@ -2349,6 +2352,7 @@
                     modelStatus.textContent = '✓ AI model ready';
                     modelStatus.style.color = '#4CAF50';
                 }
+                isEngineReady = true;
                 isEngineLoading = false;
                 
             } catch (error) {
@@ -2359,7 +2363,36 @@
                 }
                 isEngineLoading = false;
                 engine = null;
+                isEngineReady = false;
             }
+        }
+
+        async function ensureEngineReady() {
+            if (!engine && !isEngineLoading) {
+                await initializeEngine();
+            }
+
+            if (isEngineLoading) {
+                while (isEngineLoading) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+            }
+
+            if (!engine) return false;
+            if (isEngineReady) return true;
+
+            // Fallback: try reloading the model if engine exists but isn't ready
+            if (engine?.reload) {
+                try {
+                    await engine.reload(MODEL_NAME);
+                    isEngineReady = true;
+                    return true;
+                } catch (error) {
+                    console.error('Error reloading WebLLM model:', error);
+                }
+            }
+
+            return false;
         }
 
         /*
@@ -2390,39 +2423,19 @@
             currentlyGeneratingIndex = submissionIndex;
             
             // Initialize engine if not already done
-            if (!engine && !isEngineLoading) {
+            if (!engine || !isEngineReady || isEngineLoading) {
                 if (currentlyGeneratingIndex === submissionIndex) {
                     summaryContent.textContent = 'Initializing AI model (first time)...';
                     summaryContent.classList.add('summary-loading');
                 }
-                await initializeEngine();
-                if (!engine) {
-                    currentlyGeneratingIndex = -1;
-                    return; // Initialization failed
-                }
-            }
-            
-            // Wait for engine if still loading
-            if (isEngineLoading) {
-                if (currentlyGeneratingIndex === submissionIndex) {
-                    summaryContent.textContent = 'AI model is still loading, please wait...';
-                    summaryContent.classList.add('summary-loading');
-                }
-                // Poll until loaded
-                while (isEngineLoading) {
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    // Check if user switched away
-                    if (currentlyGeneratingIndex !== submissionIndex) {
-                        return; // User switched attempts, abort
-                    }
-                }
-                if (!engine) {
+                const ready = await ensureEngineReady();
+                if (!ready) {
                     if (currentlyGeneratingIndex === submissionIndex) {
                         summaryContent.textContent = 'AI model failed to load. Please refresh and try again.';
                         summaryContent.classList.remove('summary-loading');
                     }
                     currentlyGeneratingIndex = -1;
-                    return;
+                    return; // Initialization failed
                 }
             }
             
