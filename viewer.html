@@ -1188,6 +1188,15 @@
                 return { mapping, maxLine };
             }
 
+            function stripEndOfEditLines(lines) {
+                const body = [];
+                for (const line of lines) {
+                    if (line.trim() === 'end_of_edit') break;
+                    body.push(line);
+                }
+                return body;
+            }
+
             function parseResponseActions(responseText) {
                 const actions = [];
                 const blocks = extractCodeBlocks(responseText);
@@ -1209,20 +1218,18 @@
                         const parts = first.split(/\s+/);
                         if (parts.length >= 2) {
                             const filename = normalizeFilename(parts[1]);
-                            const contentLines = lines.slice(1);
+                            const contentLines = stripEndOfEditLines(lines.slice(1));
                             actions.push({ type: 'create', filename, contentLines });
                         }
                         continue;
                     }
                     
-                    if (first.startsWith('edit ')) {
-                        const match = first.match(/edit\s+(\d+):(\d+)/);
-                        if (match) {
-                            const start = parseInt(match[1]);
-                            const end = parseInt(match[2]);
-                            const contentLines = lines.slice(1);
-                            actions.push({ type: 'edit', start, end, lines: contentLines });
-                        }
+                    const editMatch = first.match(/^(?:edit\s+)?(\d+):(\d+)$/);
+                    if (editMatch) {
+                        const start = parseInt(editMatch[1]);
+                        const end = parseInt(editMatch[2]);
+                        const contentLines = stripEndOfEditLines(lines.slice(1));
+                        actions.push({ type: 'edit', start, end, lines: contentLines });
                         continue;
                     }
                     
@@ -1734,7 +1741,7 @@
         function parseEditAction(action) {
             const lines = action.split('\n');
             const header = lines[0].trim();
-            const match = header.match(/edit\s+(\d+):(\d+)/);
+            const match = header.match(/^(?:edit\s+)?(\d+):(\d+)$/);
             if (!match) return null;
 
             const start = parseInt(match[1]);
