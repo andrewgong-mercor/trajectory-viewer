@@ -509,6 +509,40 @@
             width: 150px;
         }
 
+        .workspace-files {
+            margin-top: 8px;
+            border: 1px solid rgba(102, 126, 234, 0.15);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.65);
+            max-height: 260px;
+            overflow-y: auto;
+        }
+
+        .workspace-file {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            padding: 6px 10px;
+            border-bottom: 1px solid rgba(102, 126, 234, 0.08);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 0.82em;
+        }
+
+        .workspace-file:last-child {
+            border-bottom: none;
+        }
+
+        .workspace-file-name {
+            color: #334;
+            word-break: break-word;
+        }
+
+        .workspace-file-lines {
+            color: #6c757d;
+            white-space: nowrap;
+        }
+
         .summary-section {
             background: rgba(240, 247, 255, 0.5);
             backdrop-filter: blur(10px);
@@ -1444,7 +1478,8 @@
                     const parts = actionTrimmed.split(/\s+/);
                     submitEvents.push({
                         stepIdx: i,
-                        submittedPath: parts.length >= 2 ? parts[1].trim() : ''
+                        submittedPath: parts.length >= 2 ? parts[1].trim() : '',
+                        workspaceSnapshot: snapshotFiles(files)
                     });
                 } else if (actionIsFileView) {
                     // Some newer trajectories store file views directly in action
@@ -1524,8 +1559,13 @@
                     }
                 }
                 
-                // Get snapshot of all files at the end of preprocessing
-                const preprocessSnapshot = snapshotFiles(files);
+                // Get workspace snapshot for preprocessing phase
+                let preprocessSnapshot = {};
+                if (hasNoSubmits) {
+                    preprocessSnapshot = snapshotFiles(files);
+                } else if (submitEvents.length > 0 && submitEvents[0].workspaceSnapshot) {
+                    preprocessSnapshot = submitEvents[0].workspaceSnapshot;
+                }
                 
                 // Extract .py files from preprocessing snapshot
                 const preprocessPyFiles = Object.entries(preprocessSnapshot)
@@ -1599,7 +1639,8 @@
                     conversation: preprocessConversation,
                     summary: null,
                     isPreprocessing: true,
-                    failedSubmission: false
+                    failedSubmission: false,
+                    workspaceFiles: buildWorkspaceFileList(preprocessSnapshot)
                 });
             }
 
@@ -1700,6 +1741,9 @@
                 const endIdx = (attempt === numSubmissions - 1) ? (trajectory.length - 1) : submit.stepIdx;
                 const conversation = buildConversation(trajectory, trajJson.history || [], prevSubmitIdx + 1, endIdx);
 
+                const workspaceSnapshot = submit.workspaceSnapshot || (lastRun ? lastRun.snapshots : {});
+                const workspaceFiles = buildWorkspaceFileList(workspaceSnapshot);
+
                 submissions.push({
                     attempt: attempt + 1,
                     stepIdx: submit.stepIdx,
@@ -1712,7 +1756,8 @@
                     conversation: conversation,
                     summary: null, // Will be populated by LLM API call
                     isPreprocessing: false,
-                    failedSubmission: failedSubmissions.has(attempt)
+                    failedSubmission: failedSubmissions.has(attempt),
+                    workspaceFiles: workspaceFiles
                 });
             }
 
@@ -1736,6 +1781,19 @@
                 snapshots[filename] = trimmedLines.join('\n') + (trimmedLines.length > 0 ? '\n' : '');
             }
             return snapshots;
+        }
+
+        function buildWorkspaceFileList(snapshot) {
+            if (!snapshot) return [];
+
+            return Object.entries(snapshot)
+                .map(([filename, content]) => {
+                    const contentStr = typeof content === 'string' ? content : '';
+                    const normalized = contentStr.endsWith('\n') ? contentStr.slice(0, -1) : contentStr;
+                    const lineCount = normalized.length > 0 ? normalized.split('\n').length : 0;
+                    return { filename, lineCount };
+                })
+                .sort((a, b) => a.filename.localeCompare(b.filename));
         }
 
         function parseEditAction(action) {
@@ -2225,6 +2283,16 @@
 
             // Update metadata
             const metaContent = document.getElementById('metadata-content');
+            const workspaceFiles = sub.workspaceFiles || [];
+            const workspaceFilesHtml = workspaceFiles.length > 0
+                ? `<div class="workspace-files">${workspaceFiles.map(file => `
+                    <div class="workspace-file">
+                        <span class="workspace-file-name">${escapeHtml(file.filename)}</span>
+                        <span class="workspace-file-lines">${file.lineCount} line${file.lineCount === 1 ? '' : 's'}</span>
+                    </div>
+                `).join('')}</div>`
+                : '<div class="workspace-files"><div class="workspace-file"><span class="workspace-file-name">No files captured</span><span class="workspace-file-lines">0 lines</span></div></div>';
+
             metaContent.innerHTML = `
                 <div class="metadata-item">
                     <span class="metadata-label">Attempt:</span>
@@ -2250,6 +2318,11 @@
                     <span class="metadata-label">Code Type:</span>
                     <span>${sub.codeType}</span>
                 </div>
+                <div class="metadata-item">
+                    <span class="metadata-label">Workspace Files:</span>
+                    <span>${workspaceFiles.length}</span>
+                </div>
+                ${workspaceFilesHtml}
             `;
         }
 
